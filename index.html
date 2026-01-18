@@ -1,10 +1,15 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-    <meta charset="UTF-8">
-    <!-- 这一行非常重要，强制手机端以 1:1 比例显示，禁止缩放 -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>我的小空间</title>
+ <!-- 在 head 标签里找到这些，确保是这样的 -->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000">
+<title>我的小空间</title>
+
     <link rel="stylesheet" href="style.css">
     <!-- 引入 Vue -->
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
