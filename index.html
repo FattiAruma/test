@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" name="theme-color" content="#ffffff">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>我的小空间</title>
+    <link rel="stylesheet" href="style.css">
+    <!-- ...后面是你原本的脚本代码... -->
+    <!-- 错误捕获脚本 -->
+    <script>
+        window.addEventListener('error', function(e) {
+            alert('❌ 发生错误:\n' + e.message + '\n\n如果是 "Failed to resolve module"，请检查 apps 文件夹里的文件名是否大小写正确！');
+        });
+    </script>
+</head>
+<body>
+    
+    <!-- v-cloak 放在这里 -->
+    <div id="app" v-cloak>
+        <div id="wallpaper-layer" :style="{ backgroundImage: 'url(' + wallpaper + ')' }"></div>
+
+        <div class="widget-area">
+            <div class="avatar" :class="avatar.frame" :style="avatar.img ? { backgroundImage: 'url(' + avatar.img + ')' } : {}" @click="activeModal = 'image'; uploadTargetType = 'avatar'">
+                <span v-if="!avatar.img">🎀</span>
+            </div>
+            <div class="user-name" :style="{ color: colors.header }" @click="openSingleEdit('name', '名字')">{{ profile.name }}</div>
+            <div class="user-bio" :style="{ color: colors.header }" @click="openSingleEdit('bio1', '第一行简介')">{{ profile.bio1 }}</div>
+            <div class="user-bio" style="margin-top: 2px;" :style="{ color: colors.header }" @click="openSingleEdit('bio2', '第二行简介')">{{ profile.bio2 }}</div>
+        </div>
+
+        <div class="layout-container">
+            <div class="photo-widget photo-1" :style="{ backgroundImage: 'url(' + photos[0] + ')' }" @click="activeModal = 'image'; uploadTargetType = 'photo'; uploadTargetIndex = 0"></div>
+            
+            <div class="app-item" v-for="(app, key) in desktopApps" :key="key" @click="handleAppClick(key)">
+                <div class="app-icon" :style="[app.img ? { backgroundImage: 'url(' + app.img + ')' } : {}, { color: colors.app }]"><span v-if="!app.img">{{ app.icon }}</span></div>
+                <span class="app-name" :style="{ color: colors.app }">{{ app.name }}</span>
+            </div>
+
+            <div class="glass-box text-widget" @click="openTextEdit(0)" :style="{ alignItems: getFlexAlign(textWidgets[0].align), textAlign: textWidgets[0].align }">
+                <div class="text-title" :style="{ color: colors.widget }">{{ textWidgets[0].title }}</div>
+                <div class="text-desc" :style="{ color: colors.widget }">{{ textWidgets[0].desc }}</div>
+            </div>
+            
+            <div class="photo-widget photo-2" style="grid-row: 3 / span 2; grid-column: 3 / span 2;" :style="{ backgroundImage: 'url(' + photos[1] + ')' }" @click="activeModal = 'image'; uploadTargetType = 'photo'; uploadTargetIndex = 1"></div>
+            
+            <div class="glass-box text-widget" @click="openTextEdit(1)" :style="{ alignItems: getFlexAlign(textWidgets[1].align), textAlign: textWidgets[1].align }">
+                <div class="text-title" :style="{ color: colors.widget }">{{ textWidgets[1].title }}</div>
+                <div class="text-desc" :style="{ color: colors.widget }">{{ textWidgets[1].desc }}</div>
+            </div>
+        </div>
+
+        <div class="dock-wrapper">
+            <div class="dock">
+                <div class="app-item" v-for="(app, key) in dockApps" :key="key" @click="handleAppClick(key)">
+                    <div class="app-icon" :style="[app.img ? { backgroundImage: 'url(' + app.img + ')' } : {}, { color: colors.app }]"><span v-if="!app.img">{{ app.icon }}</span></div>
+                    <span class="app-name" :style="{ color: colors.app }">{{ app.name }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 引入子组件 -->
+        <qq-apps 
+            :is-open="isQQOpen" 
+            :api-config="apiConfig" 
+            :qq-data="qqData"
+            @close="isQQOpen = false">
+        </qq-apps>
+
+        <settings-app 
+            :is-open="isSettingsOpen" 
+            :api-config="apiConfig" 
+            v-model:model-list="modelList"
+            :saved-apis="savedApis"
+            @close="isSettingsOpen = false">
+        </settings-app>
+
+        <theme-apps 
+            :is-open="isBeautifyOpen"
+            :state="themeState" 
+            @trigger-upload="handleThemeUpload"
+            @reset="resetBeautify"
+            @close="isBeautifyOpen = false">
+        </theme-apps>
+
+        <!-- 弹窗部分 -->
+        <div class="modal-overlay" v-if="activeModal === 'singleEdit'" @click.self="activeModal = null">
+            <div class="modal-content">
+                <div class="modal-title">编辑 {{ editTargetLabel }}</div>
+                <input type="text" class="modal-input" v-model="tempInputVal">
+                <button class="modal-btn" style="color: #34c759;" @click="saveSingleEdit">✅ 保存</button>
+                <button class="modal-btn cancel" @click="activeModal = null">取消</button>
+            </div>
+        </div>
+        
+        <div class="modal-overlay" v-if="activeModal === 'image'" @click.self="activeModal = null">
+            <div class="modal-content">
+                <div class="modal-title">个性化</div>
+                <button class="modal-btn" @click="triggerFileUpload(uploadTargetType, uploadTargetIndex)">📂 本地上传 (相册)</button>
+                <button class="modal-btn" @click="handleLinkUpload(uploadTargetType, uploadTargetIndex)">🔗 链接上传 (URL)</button>
+                <button class="modal-btn" v-if="uploadTargetType === 'avatar'" @click="activeModal = 'frame'" style="color: #ff6b81;">🖼️ 更换头像框</button>
+                <button class="modal-btn cancel" @click="activeModal = null">取消</button>
+            </div>
+        </div>
+        
+        <div class="modal-overlay" v-if="activeModal === 'frame'" @click.self="activeModal = null">
+            <div class="modal-content">
+                <div class="modal-title">选择头像框</div>
+                <div class="frame-grid">
+                    <div class="frame-option-container" @click="setFrame('')"><div class="frame-preview frame-none"></div><div class="frame-label">无</div></div>
+                    <div class="frame-option-container" @click="setFrame('frame-pink')"><div class="frame-preview frame-pink"></div><div class="frame-label">简约粉</div></div>
+                    <div class="frame-option-container" @click="setFrame('frame-gradient')"><div class="frame-preview frame-gradient"></div><div class="frame-label">梦幻紫</div></div>
+                    <div class="frame-option-container" @click="setFrame('frame-stitch')"><div class="frame-preview frame-stitch"></div><div class="frame-label">缝纫风</div></div>
+                    <div class="frame-option-container" @click="setFrame('frame-gold')"><div class="frame-preview frame-gold"></div><div class="frame-label">流光金</div></div>
+                </div>
+                <button class="modal-btn cancel" @click="activeModal = null">返回</button>
+            </div>
+        </div>
+
+        <div class="modal-overlay" v-if="activeModal === 'wallpaper'" @click.self="activeModal = null">
+            <div class="modal-content">
+                <div class="modal-title">选择壁纸来源</div>
+                <button class="modal-btn" @click="triggerFileUpload('wallpaper')">📂 本地上传 (相册)</button>
+                <button class="modal-btn" @click="handleLinkUpload('wallpaper')">🔗 链接上传 (URL)</button>
+                <button class="modal-btn cancel" @click="activeModal = null">取消</button>
+            </div>
+        </div>
+
+        <div class="modal-overlay" v-if="activeModal === 'textEdit'" @click.self="activeModal = null">
+            <div class="modal-content">
+                <div class="modal-title">编辑文字组件</div>
+                <div class="text-input-group">
+                    <input type="text" class="modal-input" v-model="tempText.title" placeholder="标题">
+                    <input type="text" class="modal-input" v-model="tempText.desc" placeholder="内容">
+                </div>
+                <div class="align-control">
+                    <button class="align-btn" :class="{ active: tempText.align === 'left' }" @click="tempText.align = 'left'">⬅️ 左</button>
+                    <button class="align-btn" :class="{ active: tempText.align === 'center' }" @click="tempText.align = 'center'">⬇️ 中</button>
+                    <button class="align-btn" :class="{ active: tempText.align === 'right' }" @click="tempText.align = 'right'">➡️ 右</button>
+                </div>
+                <button class="modal-btn" style="color: #34c759;" @click="saveTextEdit">✅ 保存修改</button>
+                <button class="modal-btn cancel" @click="activeModal = null">取消</button>
+            </div>
+        </div>
+        
+        <div class="modal-overlay" v-if="activeModal === 'icon'" @click.self="activeModal = null">
+            <div class="modal-content">
+                <div class="modal-title">更换图标</div>
+                <button class="modal-btn" @click="triggerFileUpload('icon', uploadTargetIndex)">📂 本地上传 (相册)</button>
+                <button class="modal-btn" @click="handleLinkUpload('icon', uploadTargetIndex)">🔗 链接上传 (URL)</button>
+                <button class="modal-btn cancel" @click="activeModal = null">取消</button>
+            </div>
+        </div>
+
+        <input type="file" ref="fileInput" hidden accept="image/*" @change="handleFileChange">
+    </div>
+
+    <!-- 引用 main.js -->
+    <script type="module" src="main.js"></script>
+</body>
+</html>
