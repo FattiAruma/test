@@ -4,14 +4,32 @@ import { ref } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
 export default {
     props: {
         isOpen: Boolean,
-        state: Object 
+        state: Object // 传入整个状态对象，方便修改颜色和图标
     },
     emits: ['close', 'reset', 'trigger-upload'],
     setup(props, { emit }) {
+        const allApps = props.state.allApps; // 从 props 访问
+        const activeModal = ref(null);
+        
+        // 简单的本地处理，具体的上传逻辑委托给 Main 处理
         const openIconModal = (key) => {
             emit('trigger-upload', { type: 'icon', key: key });
         };
-        return { openIconModal };
+
+        const triggerWallpaper = () => {
+             // 打开选择壁纸的弹窗
+             activeModal.value = 'wallpaper';
+        };
+        
+        // 这里的 modal 只是 Theme App 内部的小弹窗，或者委托给 Main
+        // 为了简化，我们在 ThemeApp 内部只显示列表，点击后由 Main 弹窗处理
+        // 但颜色修改是实时的
+        
+        return { 
+            activeModal,
+            openIconModal,
+            triggerWallpaper
+        };
     },
     template: `
     <div class="app-window" :class="{ open: isOpen }">

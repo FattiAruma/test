@@ -1,5 +1,5 @@
 // apps/QQApps.js
-import { ref, reactive, nextTick } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
+import { ref, reactive, nextTick, toRaw } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
 
 export default {
     props: {
@@ -158,6 +158,7 @@ export default {
     },
     template: `
     <div class="app-window" :class="{ open: isOpen }">
+        <!-- 列表视图 -->
         <div v-if="!qqData.currentChatId" style="display:flex; flex-direction:column; height:100%;">
             <div class="app-header">
                 <div class="app-header-title">消息</div>
@@ -183,6 +184,7 @@ export default {
             </div>
         </div>
 
+        <!-- 聊天视图 -->
         <div v-else class="chat-container" style="height:100%;">
             <div class="app-header">
                 <div class="app-header-left" @click="qqData.currentChatId = null">
@@ -203,6 +205,7 @@ export default {
             </div>
         </div>
 
+        <!-- QQ 设置专属弹窗 -->
         <div class="modal-overlay" v-if="isQQSettingsOpen" @click.self="isQQSettingsOpen = false">
             <div class="modal-content" style="max-height: 85vh;">
                 <div class="modal-title">聊天设置</div>

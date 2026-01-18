@@ -1,12 +1,30 @@
 /* style.css */
+/* 核心修复区域 */
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; }
-html, body { width: 100%; height: 100dvh; overflow: hidden; overscroll-behavior: none; position: fixed; }
-body { background-color: #333; color: #4a4a4a; } /* 背景深色一点，避免加载时太亮 */
-#app { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; position: relative; }
-#wallpaper-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: -1; background-color: #f2f2f7; background-size: cover; background-position: center; background-repeat: no-repeat; transition: background-image 0.3s ease; }
 
-/* 防止 Vue 加载前显示乱码 */
-[v-cloak] { display: none !important; }
+/* 强制 html/body 铺满屏幕并设为白色 */
+html { width: 100%; height: 100%; background-color: #fff; }
+body { 
+    width: 100%; 
+    height: 100%; 
+    overflow: hidden; /* 防止页面整体滚动 */
+    overscroll-behavior: none; /* 防止iOS橡皮筋效果漏出灰色 */
+    position: fixed; /* 锁死位置 */
+    background-color: #fff; /* 这里改成白色，解决变灰问题 */
+    color: #4a4a4a; 
+}
+
+#app { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; position: relative; }
+
+/* 壁纸层：使用 fixed 确保永远覆盖全屏 */
+#wallpaper-layer { 
+    position: fixed; 
+    top: 0; left: 0; width: 100%; height: 100%; 
+    z-index: -1; 
+    background-color: #fff; /* 这里也给一个白色底 */
+    background-size: cover; background-position: center; background-repeat: no-repeat; 
+    transition: background-image 0.3s ease; 
+}
 
 /* 桌面组件样式 */
 .widget-area { width: 90%; margin-top: 20px; background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); border-radius: 25px; padding: 20px; display: flex; flex-direction: column; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.05); border: 1px solid rgba(255,255,255,0.4); flex-shrink: 0; }
@@ -20,8 +38,14 @@ body { background-color: #333; color: #4a4a4a; } /* 背景深色一点，避免�
 .user-bio { font-size: 12px; opacity: 0.8; text-align: center; cursor: pointer; min-height: 14px; min-width: 50px; }
 .user-bio:active { opacity: 0.5; }
 
-/* 布局网格 */
-.layout-container { width: 100%; max-width: 380px; flex: 1; padding: 25px; display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: min-content; gap: 12px; align-content: start; overflow-y: auto; }
+/* 布局网格 - 移除最大宽度限制，防止在部分手机上显得太窄 */
+.layout-container { 
+    width: 100%; 
+    /* max-width: 380px;  <-- 删除了这行，防止宽屏手机两边留白 */
+    flex: 1; 
+    padding: 25px; 
+    display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: min-content; gap: 12px; align-content: start; overflow-y: auto; 
+}
 .layout-container::-webkit-scrollbar { display: none; }
 .glass-box { background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-radius: 20px; border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 5px 15px rgba(0,0,0,0.05); overflow: hidden; position: relative; }
 .photo-widget { grid-column: span 2; grid-row: span 2; aspect-ratio: 1 / 1; background-color: transparent; background-size: cover; background-position: center; background-repeat: no-repeat; cursor: pointer; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.1)); border-radius: 20px; }

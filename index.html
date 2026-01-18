@@ -2,24 +2,20 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" name="theme-color" content="#ffffff">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <!-- 这一行非常重要，强制手机端以 1:1 比例显示，禁止缩放 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>我的小空间</title>
     <link rel="stylesheet" href="style.css">
-    <!-- ...后面是你原本的脚本代码... -->
-    <!-- 错误捕获脚本 -->
-    <script>
-        window.addEventListener('error', function(e) {
-            alert('❌ 发生错误:\n' + e.message + '\n\n如果是 "Failed to resolve module"，请检查 apps 文件夹里的文件名是否大小写正确！');
-        });
-    </script>
+    <!-- 引入 Vue -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
 </head>
 <body>
     
-    <!-- v-cloak 放在这里 -->
-    <div id="app" v-cloak>
+    <div id="app">
+        <!-- 壁纸 -->
         <div id="wallpaper-layer" :style="{ backgroundImage: 'url(' + wallpaper + ')' }"></div>
 
+        <!-- 桌面顶部 -->
         <div class="widget-area">
             <div class="avatar" :class="avatar.frame" :style="avatar.img ? { backgroundImage: 'url(' + avatar.img + ')' } : {}" @click="activeModal = 'image'; uploadTargetType = 'avatar'">
                 <span v-if="!avatar.img">🎀</span>
@@ -29,6 +25,7 @@
             <div class="user-bio" style="margin-top: 2px;" :style="{ color: colors.header }" @click="openSingleEdit('bio2', '第二行简介')">{{ profile.bio2 }}</div>
         </div>
 
+        <!-- 桌面布局 -->
         <div class="layout-container">
             <div class="photo-widget photo-1" :style="{ backgroundImage: 'url(' + photos[0] + ')' }" @click="activeModal = 'image'; uploadTargetType = 'photo'; uploadTargetIndex = 0"></div>
             
@@ -50,6 +47,7 @@
             </div>
         </div>
 
+        <!-- 底部 Dock -->
         <div class="dock-wrapper">
             <div class="dock">
                 <div class="app-item" v-for="(app, key) in dockApps" :key="key" @click="handleAppClick(key)">
@@ -59,13 +57,13 @@
             </div>
         </div>
 
-        <!-- 引入子组件 -->
-        <qq-apps 
+        <!-- === 子应用组件 === -->
+        <q-q-apps 
             :is-open="isQQOpen" 
             :api-config="apiConfig" 
             :qq-data="qqData"
             @close="isQQOpen = false">
-        </qq-apps>
+        </q-q-apps>
 
         <settings-app 
             :is-open="isSettingsOpen" 
@@ -83,7 +81,7 @@
             @close="isBeautifyOpen = false">
         </theme-apps>
 
-        <!-- 弹窗部分 -->
+        <!-- === 弹窗 === -->
         <div class="modal-overlay" v-if="activeModal === 'singleEdit'" @click.self="activeModal = null">
             <div class="modal-content">
                 <div class="modal-title">编辑 {{ editTargetLabel }}</div>
@@ -155,7 +153,7 @@
         <input type="file" ref="fileInput" hidden accept="image/*" @change="handleFileChange">
     </div>
 
-    <!-- 引用 main.js -->
+    <!-- 引入 main.js，注意 type="module" -->
     <script type="module" src="main.js"></script>
 </body>
 </html>

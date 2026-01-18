@@ -4,7 +4,8 @@ import QQApps from './apps/QQApps.js';
 import SettingsApp from './apps/SettingsApp.js';
 import ThemeApps from './apps/ThemeApps.js';
 
-const app = createApp({
+createApp({
+    components: { QQApps, SettingsApp, ThemeApps },
     setup() {
         const defaultData = {
             wallpaper: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=1000&auto=format&fit=crop',
@@ -37,6 +38,7 @@ const app = createApp({
             qqChats: [] 
         };
 
+        // 响应式状态
         const wallpaper = ref(defaultData.wallpaper);
         const avatar = reactive({ ...defaultData.avatar });
         const profile = reactive({ ...defaultData.profile });
@@ -51,10 +53,12 @@ const app = createApp({
         const savedApis = ref([]);
         const qqData = reactive({ chatList: [], currentChatId: null, inputMsg: '', isSending: false });
         
+        // App 开关状态
         const isQQOpen = ref(false);
         const isSettingsOpen = ref(false);
         const isBeautifyOpen = ref(false);
 
+        // 弹窗控制
         const activeModal = ref(null);
         const uploadTargetType = ref('');
         const uploadTargetIndex = ref(null);
@@ -66,9 +70,12 @@ const app = createApp({
 
         const allApps = computed(() => ({ ...desktopApps, ...dockApps }));
         
-        const themeState = reactive({ colors, allApps });
+        // 专门传递给 ThemeApp 的状态包
+        const themeState = reactive({
+            colors, allApps
+        });
 
-        const STORAGE_KEY = 'mySpaceData_v7_clean';
+        const STORAGE_KEY = 'mySpaceData_v6_vue_split';
 
         const loadData = () => {
             const saved = localStorage.getItem(STORAGE_KEY);
@@ -107,12 +114,14 @@ const app = createApp({
 
         onMounted(() => loadData());
 
+        // 处理 App 点击
         const handleAppClick = (key) => {
             if (key === 'theme') isBeautifyOpen.value = true;
             else if (key === 'settings') isSettingsOpen.value = true;
             else if (key === 'qq') isQQOpen.value = true;
         };
 
+        // 处理上传逻辑 (通用)
         const triggerFileUpload = (type, index = null) => {
             uploadTargetType.value = type;
             uploadTargetIndex.value = index;
@@ -125,7 +134,7 @@ const app = createApp({
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
                 reader.onload = (ev) => {
-                    const url = ev.target.result;
+                    const url = ev.target.result; // 这里简化了压缩逻辑
                     applyUpload(url);
                 };
             }
@@ -154,6 +163,7 @@ const app = createApp({
             activeModal.value = null;
         };
 
+        // 接收 ThemeApp 的上传请求
         const handleThemeUpload = (payload) => {
             if (payload.type === 'wallpaper-menu') activeModal.value = 'wallpaper';
             else if (payload.type === 'icon') {
@@ -163,7 +173,8 @@ const app = createApp({
             }
         };
 
-        const openImageModal = (type, index) => { triggerFileUpload(type, index); activeModal.value = 'image'; };
+        // 其他 Modal 逻辑
+        const openImageModal = (type, index) => { triggerFileUpload(type, index); activeModal.value = 'image'; }; // 简化
         const setFrame = (f) => { avatar.frame = f; activeModal.value = null; };
         const openSingleEdit = (key, label) => { editTargetKey.value = key; editTargetLabel.value = label; tempInputVal.value = profile[key]; activeModal.value = 'singleEdit'; };
         const saveSingleEdit = () => { if (editTargetKey.value) profile[editTargetKey.value] = tempInputVal.value; activeModal.value = null; };
@@ -196,11 +207,4 @@ const app = createApp({
             getFlexAlign, handleThemeUpload, resetBeautify
         };
     }
-});
-
-// 显式注册组件，防止 HTML 内的标签无法识别
-app.component('qq-apps', QQApps);
-app.component('settings-app', SettingsApp);
-app.component('theme-apps', ThemeApps);
-
-app.mount('#app');
+}).mount('#app');
