@@ -7,6 +7,7 @@ import ThemeApps from './apps/ThemeApps.js';
 createApp({
     components: { QQApps, SettingsApp, ThemeApps },
     setup() {
+        // === 1. 定义默认数据 ===
         const defaultData = {
             wallpaper: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=1000&auto=format&fit=crop',
             avatar: { img: '', frame: 'frame-pink' },
@@ -38,7 +39,7 @@ createApp({
             qqChats: [] 
         };
 
-        // 响应式状态
+        // === 2. 响应式状态 ===
         const wallpaper = ref(defaultData.wallpaper);
         const avatar = reactive({ ...defaultData.avatar });
         const profile = reactive({ ...defaultData.profile });
@@ -51,7 +52,7 @@ createApp({
         const apiConfig = reactive({ ...defaultData.apiConfig });
         const modelList = ref([]);
         const savedApis = ref([]);
-        const qqData = reactive({ chatList: [], currentChatId: null, inputMsg: '', isSending: false });
+        const qqData = reactive({ chatList: [], currentChatId: null, inputMsg: '', isSending: false, aiGeneralStickers: [], userStickers: [] });
         
         // App 开关状态
         const isQQOpen = ref(false);
@@ -67,51 +68,91 @@ createApp({
         const tempInputVal = ref('');
         const editTargetKey = ref('');
         const editTargetLabel = ref('');
+        
+        // ★★★ 安全锁：默认锁定，直到读取存档完成后才解锁 ★★★
+        const isDataLoaded = ref(false);
 
         const allApps = computed(() => ({ ...desktopApps, ...dockApps }));
         
-        // 专门传递给 ThemeApp 的状态包
         const themeState = reactive({
             colors, allApps
         });
 
         const STORAGE_KEY = 'mySpaceData_v6_vue_split';
 
+        // === 3. 读写存档逻辑 ===
+        
         const loadData = () => {
             const saved = localStorage.getItem(STORAGE_KEY);
             if (saved) {
                 try {
                     const data = JSON.parse(saved);
+                    
+                    // 逐项恢复数据
                     if(data.wallpaper) wallpaper.value = data.wallpaper;
                     if(data.avatar) Object.assign(avatar, data.avatar);
                     if(data.profile) Object.assign(profile, data.profile);
                     if(data.colors) Object.assign(colors, data.colors);
                     if(data.photos) photos.splice(0, photos.length, ...data.photos);
-                    if(data.desktopApps) Object.assign(desktopApps, data.desktopApps);
-                    if(data.dockApps) Object.assign(dockApps, data.dockApps);
+                    
+                    // 智能合并应用数据（防止代码新增App时被旧存档覆盖消失）
+                    if(data.desktopApps) {
+                         for (const key in desktopApps) {
+                             if(data.desktopApps[key]) Object.assign(desktopApps[key], data.desktopApps[key]);
+                         }
+                    }
+                    if(data.dockApps) {
+                        for (const key in dockApps) {
+                            if(data.dockApps[key]) Object.assign(dockApps[key], data.dockApps[key]);
+                        }
+                    }
+
                     if(data.textWidgets) textWidgets.splice(0, textWidgets.length, ...data.textWidgets);
                     if(data.apiConfig) Object.assign(apiConfig, data.apiConfig);
                     if(data.modelList) modelList.value = data.modelList;
                     if(data.savedApis) savedApis.value = data.savedApis;
                     if(data.qqChats) qqData.chatList = data.qqChats;
-                } catch (e) { console.error("读取存档失败", e); }
+                    
+                    // ★新增：恢復表情包數據
+                    if(data.aiGeneralStickers) qqData.aiGeneralStickers = data.aiGeneralStickers;
+                    if(data.userStickers) qqData.userStickers = data.userStickers;
+                    
+                    console.log("✅ 存檔讀取成功");
+                } catch (e) { console.error("讀取存檔失敗", e); }
             }
+            // ★★★ 关键步骤：只有读取完（无论成功失败），才允许后续的保存操作 ★★★
+            isDataLoaded.value = true;
         };
 
         const saveData = () => {
+            // ★★★ 安全锁检查：如果还没加载完，严禁保存！ ★★★
+            if (!isDataLoaded.value) {
+                // console.log("⏳ 初始化中，跳过自动保存...");
+                return;
+            }
+
             const dataToSave = {
                 wallpaper: wallpaper.value, avatar: avatar, profile: profile, colors: colors,
                 photos: photos, desktopApps: desktopApps, dockApps: dockApps, textWidgets: textWidgets,
                 apiConfig: apiConfig, modelList: modelList.value, savedApis: savedApis.value,
-                qqChats: qqData.chatList
+                qqChats: qqData.chatList,
+                // ★新增：保存表情包數據
+                aiGeneralStickers: qqData.aiGeneralStickers,
+                userStickers: qqData.userStickers
             };
-            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave)); } catch (e) {}
+            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave)); } catch (e) {
+                 if (e.name === 'QuotaExceededError') {
+                    alert("⚠️ 空間不足！請確保只使用鏈接上傳。");
+                }
+            }
         };
 
-        watch([wallpaper, avatar, profile, colors, photos, desktopApps, dockApps, textWidgets, apiConfig, modelList, savedApis, () => qqData.chatList], () => {
+        // 监听变化自动保存
+        watch([wallpaper, avatar, profile, colors, photos, desktopApps, dockApps, textWidgets, apiConfig, modelList, savedApis, () => qqData.chatList, () => qqData.aiGeneralStickers, () => qqData.userStickers], () => {
             saveData();
         }, { deep: true });
 
+        // 挂载时读取
         onMounted(() => loadData());
 
         // 处理 App 点击
@@ -121,35 +162,25 @@ createApp({
             else if (key === 'qq') isQQOpen.value = true;
         };
 
-        // 处理上传逻辑 (通用)
-        const triggerFileUpload = (type, index = null) => {
-            uploadTargetType.value = type;
-            uploadTargetIndex.value = index;
-            fileInput.value.click();
-        };
-
-        const handleFileChange = async (e) => {
-            const file = e.target.files[0];
-            if (file) {
-                const reader = new FileReader();
-                reader.readAsDataURL(file);
-                reader.onload = (ev) => {
-                    const url = ev.target.result; // 这里简化了压缩逻辑
-                    applyUpload(url);
-                };
-            }
-            e.target.value = '';
-        };
-
+        // === 4. 强制链接上传逻辑 ===
         const handleLinkUpload = (type, index = null) => {
             uploadTargetType.value = type;
             if (index !== null) uploadTargetIndex.value = index;
-            activeModal.value = null;
+            activeModal.value = null; 
+            
             setTimeout(() => {
-                const url = prompt("请输入图片链接:");
-                if (url && url.trim()) applyUpload(url);
+                const url = prompt("请输入图片链接 (推荐使用图床或网络图片):", "https://");
+                if (url && url.trim() && url !== "https://") {
+                     applyUpload(url);
+                }
             }, 100);
         };
+
+        const triggerFileUpload = (type, index = null) => {
+            handleLinkUpload(type, index);
+        };
+
+        const handleFileChange = async (e) => { e.target.value = ''; };
 
         const applyUpload = (url) => {
             if (uploadTargetType.value === 'avatar') avatar.img = url;
@@ -163,18 +194,13 @@ createApp({
             activeModal.value = null;
         };
 
-        // 接收 ThemeApp 的上传请求
         const handleThemeUpload = (payload) => {
-            if (payload.type === 'wallpaper-menu') activeModal.value = 'wallpaper';
-            else if (payload.type === 'icon') {
-                uploadTargetType.value = 'icon';
-                uploadTargetIndex.value = payload.key;
-                activeModal.value = 'icon';
-            }
+            if (payload.type === 'wallpaper-menu') handleLinkUpload('wallpaper');
+            else if (payload.type === 'icon') handleLinkUpload('icon', payload.key);
         };
 
         // 其他 Modal 逻辑
-        const openImageModal = (type, index) => { triggerFileUpload(type, index); activeModal.value = 'image'; }; // 简化
+        const openImageModal = (type, index) => { handleLinkUpload(type, index); }; 
         const setFrame = (f) => { avatar.frame = f; activeModal.value = null; };
         const openSingleEdit = (key, label) => { editTargetKey.value = key; editTargetLabel.value = label; tempInputVal.value = profile[key]; activeModal.value = 'singleEdit'; };
         const saveSingleEdit = () => { if (editTargetKey.value) profile[editTargetKey.value] = tempInputVal.value; activeModal.value = null; };
@@ -184,17 +210,39 @@ createApp({
         
         const getFlexAlign = (a) => { if (a === 'center') return 'center'; if (a === 'right') return 'flex-end'; return 'flex-start'; };
 
+        // === 5. 安全的重置逻辑 (保留API) ===
         const resetBeautify = () => {
-             if(confirm("重置美化？")) {
+            if(confirm("确定要重置美化设置吗？\n(包括桌面组件和卡片头像，但保留API设置)")) {
+                // 暂停保存，防止重置过程中的中间状态被保存
+                isDataLoaded.value = false; 
+
                 wallpaper.value = defaultData.wallpaper;
                 Object.assign(avatar, defaultData.avatar);
                 Object.assign(profile, defaultData.profile);
                 Object.assign(colors, defaultData.colors);
                 photos.splice(0, photos.length, ...defaultData.photos);
-                Object.assign(desktopApps, JSON.parse(JSON.stringify(defaultData.desktopApps)));
-                Object.assign(dockApps, JSON.parse(JSON.stringify(defaultData.dockApps)));
-                alert("已重置");
-             }
+                
+                // 深拷贝重置 Apps，去除所有自定义图片
+                const resetDesktop = JSON.parse(JSON.stringify(defaultData.desktopApps));
+                for(const k in desktopApps) {
+                     if(resetDesktop[k]) Object.assign(desktopApps[k], resetDesktop[k]);
+                     else if(desktopApps[k].img) desktopApps[k].img = ''; // 如果是旧代码里没有的App，至少清空图片
+                }
+                
+                const resetDock = JSON.parse(JSON.stringify(defaultData.dockApps));
+                for(const k in dockApps) {
+                    if(resetDock[k]) Object.assign(dockApps[k], resetDock[k]);
+                    else if(dockApps[k].img) dockApps[k].img = '';
+                }
+
+                textWidgets.splice(0, textWidgets.length, ...JSON.parse(JSON.stringify(defaultData.textWidgets)));
+                
+                alert("✅ 美化已重置 (API配置已保留)");
+                
+                // 重置完成，恢复保存功能，并强制保存一次
+                isDataLoaded.value = true;
+                saveData();
+            }
         };
 
         return {

@@ -1,33 +1,75 @@
 /* style.css */
 /* 核心修复区域 */
+/* style.css - 头部修改 */
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; }
-
-/* 强制 html/body 铺满屏幕并设为白色 */
-html { width: 100%; height: 100%; background-color: #fff; }
-body { 
+/* 修改点在这里：把 background-color 改成了 #ffffff (白色) */
+html { 
     width: 100%; 
-    height: 100%; 
-    overflow: hidden; /* 防止页面整体滚动 */
-    overscroll-behavior: none; /* 防止iOS橡皮筋效果漏出灰色 */
-    position: fixed; /* 锁死位置 */
-    background-color: #fff; /* 这里改成白色，解决变灰问题 */
-    color: #4a4a4a; 
+    height: 100vh; /* 改用 100vh */
+    min-height: 100vh; /* 添加最小高度 */
+    overflow: hidden; 
+    overscroll-behavior: none; 
+    background-color: #f2f2f7;
 }
 
-#app { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; position: relative; }
-
-/* 壁纸层：使用 fixed 确保永远覆盖全屏 */
-#wallpaper-layer { 
+body { 
+    width: 100%; 
+    height: 100vh; /* 改用 100vh */
+    min-height: 100vh; /* 添加最小高度 */
     position: fixed; 
-    top: 0; left: 0; width: 100%; height: 100%; 
-    z-index: -1; 
-    background-color: #fff; /* 这里也给一个白色底 */
-    background-size: cover; background-position: center; background-repeat: no-repeat; 
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: #f2f2f7;
+    color: #4a4a4a; 
+    overflow: hidden; 
+}
+
+#app { 
+    width: 100%; 
+    height: 100vh; /* 添加明确的高度 */
+    min-height: 100vh; /* 添加最小高度 */
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    position: relative; 
+    z-index: 1;
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+}
+#wallpaper-layer { 
+    position: fixed; /* 改成 fixed */
+    top: 0; 
+    left: 0; 
+    width: 100vw; /* 使用视口宽度 */
+    height: 100vh; /* 使用视口高度 */
+    z-index: -1;
+    background-color: #f2f2f7;
+    background-size: cover; 
+    background-position: center; 
+    background-repeat: no-repeat; 
     transition: background-image 0.3s ease; 
 }
 
+
 /* 桌面组件样式 */
-.widget-area { width: 90%; margin-top: 20px; background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); border-radius: 25px; padding: 20px; display: flex; flex-direction: column; align-items: center; box-shadow: 0 10px 30px rgba(0,0,0,0.05); border: 1px solid rgba(255,255,255,0.4); flex-shrink: 0; }
+.widget-area { 
+    width: 90%; 
+    margin-top: 20px; /* 保持原样或调整为更小的值，因为已经有padding-top了 */
+    background: rgba(255, 255, 255, 0.45); 
+    backdrop-filter: blur(15px); 
+    -webkit-backdrop-filter: blur(15px); 
+    border-radius: 25px; 
+    padding: 20px; 
+    display: flex; 
+    flex-direction: column; 
+    align-items: center; 
+    box-shadow: 0 10px 30px rgba(0,0,0,0.05); 
+    border: 1px solid rgba(255,255,255,0.4); 
+    flex-shrink: 0; 
+}
+
 .avatar { width: 76px; height: 76px; border-radius: 50%; background-color: #fff; margin-bottom: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: flex; justify-content: center; align-items: center; font-size: 30px; cursor: pointer; background-size: cover; background-position: center; position: relative; z-index: 1; border: none !important; }
 .frame-pink { box-shadow: 0 0 0 4px #ffb7c5; }
 .frame-gradient::after { content: ''; position: absolute; top: -4px; left: -4px; right: -4px; bottom: -4px; background: linear-gradient(to right, #a18cd1 0%, #fbc2eb 100%); border-radius: 50%; z-index: 2; pointer-events: none; padding: 4px; -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
@@ -38,14 +80,19 @@ body {
 .user-bio { font-size: 12px; opacity: 0.8; text-align: center; cursor: pointer; min-height: 14px; min-width: 50px; }
 .user-bio:active { opacity: 0.5; }
 
-/* 布局网格 - 移除最大宽度限制，防止在部分手机上显得太窄 */
 .layout-container { 
     width: 100%; 
-    /* max-width: 380px;  <-- 删除了这行，防止宽屏手机两边留白 */
     flex: 1; 
     padding: 25px; 
-    display: grid; grid-template-columns: repeat(4, 1fr); grid-auto-rows: min-content; gap: 12px; align-content: start; overflow-y: auto; 
+    padding-bottom: 120px; /* 新增这行，给 Dock 留出空间 */
+    display: grid; 
+    grid-template-columns: repeat(4, 1fr); 
+    grid-auto-rows: min-content; 
+    gap: 12px; 
+    align-content: start; 
+    overflow-y: auto; 
 }
+
 .layout-container::-webkit-scrollbar { display: none; }
 .glass-box { background: rgba(255, 255, 255, 0.45); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-radius: 20px; border: 1px solid rgba(255,255,255,0.3); box-shadow: 0 5px 15px rgba(0,0,0,0.05); overflow: hidden; position: relative; }
 .photo-widget { grid-column: span 2; grid-row: span 2; aspect-ratio: 1 / 1; background-color: transparent; background-size: cover; background-position: center; background-repeat: no-repeat; cursor: pointer; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.1)); border-radius: 20px; }
@@ -58,9 +105,22 @@ body {
 .app-icon { width: 54px; height: 54px; background: rgba(255,255,255,0.85); border-radius: 15px; display: flex; justify-content: center; align-items: center; font-size: 26px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); color: #5D4037; background-size: cover; background-position: center; background-repeat: no-repeat; }
 .app-name { font-size: 10px; font-weight: 500; text-align: center; }
 
-/* 底部 Dock */
-.dock-wrapper { width: 100%; padding: 0 15px 15px 15px; flex-shrink: 0; }
-.dock { background: rgba(255, 255, 255, 0.35); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 35px; height: 85px; display: flex; justify-content: space-around; align-items: center; padding: 0 10px; border: 1px solid rgba(255,255,255,0.2); }
+.dock-wrapper { 
+    width: 100%; 
+    padding: 0 15px 15px 15px; 
+    padding-bottom: calc(8px + env(safe-area-inset-bottom));
+    flex-shrink: 0;
+    
+    /* 新增这几行，让它固定在底部 */
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+}
+
+
+.dock { background: rgba(255, 255, 255, 0.35); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border-radius: 35px; height: 90px; display: flex; justify-content: space-around; align-items: center; padding: 0 10px; border: 1px solid rgba(255,255,255,0.2); }
 .dock .app-icon { background-color: rgba(255,255,255,0.6); width: 52px; height: 52px; }
 
 /* 弹窗窗口基础 */

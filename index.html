@@ -1,14 +1,12 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
- <!-- 在 head 标签里找到这些，确保是这样的 -->
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#000000">
-<title>我的小空间</title>
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>我的小空间</title>
 
     <link rel="stylesheet" href="style.css">
     <!-- 引入 Vue -->
@@ -96,11 +94,11 @@
             </div>
         </div>
         
+        <!-- 图片/头像通用弹窗 (已修改：移除本地上传) -->
         <div class="modal-overlay" v-if="activeModal === 'image'" @click.self="activeModal = null">
             <div class="modal-content">
-                <div class="modal-title">个性化</div>
-                <button class="modal-btn" @click="triggerFileUpload(uploadTargetType, uploadTargetIndex)">📂 本地上传 (相册)</button>
-                <button class="modal-btn" @click="handleLinkUpload(uploadTargetType, uploadTargetIndex)">🔗 链接上传 (URL)</button>
+                <div class="modal-title">更换图片</div>
+                <button class="modal-btn" @click="handleLinkUpload(uploadTargetType, uploadTargetIndex)">🔗 输入图片链接</button>
                 <button class="modal-btn" v-if="uploadTargetType === 'avatar'" @click="activeModal = 'frame'" style="color: #ff6b81;">🖼️ 更换头像框</button>
                 <button class="modal-btn cancel" @click="activeModal = null">取消</button>
             </div>
@@ -120,11 +118,11 @@
             </div>
         </div>
 
+        <!-- 壁纸弹窗 (已修改：移除本地上传) -->
         <div class="modal-overlay" v-if="activeModal === 'wallpaper'" @click.self="activeModal = null">
             <div class="modal-content">
-                <div class="modal-title">选择壁纸来源</div>
-                <button class="modal-btn" @click="triggerFileUpload('wallpaper')">📂 本地上传 (相册)</button>
-                <button class="modal-btn" @click="handleLinkUpload('wallpaper')">🔗 链接上传 (URL)</button>
+                <div class="modal-title">更换壁纸</div>
+                <button class="modal-btn" @click="handleLinkUpload('wallpaper')">🔗 输入壁纸链接</button>
                 <button class="modal-btn cancel" @click="activeModal = null">取消</button>
             </div>
         </div>
@@ -146,16 +144,16 @@
             </div>
         </div>
         
+        <!-- 图标弹窗 (已修改：移除本地上传) -->
         <div class="modal-overlay" v-if="activeModal === 'icon'" @click.self="activeModal = null">
             <div class="modal-content">
                 <div class="modal-title">更换图标</div>
-                <button class="modal-btn" @click="triggerFileUpload('icon', uploadTargetIndex)">📂 本地上传 (相册)</button>
-                <button class="modal-btn" @click="handleLinkUpload('icon', uploadTargetIndex)">🔗 链接上传 (URL)</button>
+                <button class="modal-btn" @click="handleLinkUpload('icon', uploadTargetIndex)">🔗 输入图片链接</button>
                 <button class="modal-btn cancel" @click="activeModal = null">取消</button>
             </div>
         </div>
-
-        <input type="file" ref="fileInput" hidden accept="image/*" @change="handleFileChange">
+        
+        <!-- 移除了原本在这里的 <input type="file"> -->
     </div>
 
     <!-- 引入 main.js，注意 type="module" -->

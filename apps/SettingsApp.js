@@ -44,58 +44,92 @@ export default {
             }
         };
 
+        // === 核心修改：使用严格的 API 验证逻辑 ===
         const fetchModels = async () => {
-            emit('update:modelList', []); // clear list
-            props.apiConfig.model = '';
+            emit('update:modelList', []); // 清空列表
+            props.apiConfig.model = ''; 
             apiStatus.msg = ''; apiStatus.type = ''; apiStatus.errorType = '';
             
             if (!props.apiConfig.endpoint) { apiStatus.msg = '请填写接口地址'; apiStatus.type = 'error'; apiStatus.errorType = 'url'; return; }
             if (!props.apiConfig.key) { apiStatus.msg = '请填写 API 密钥'; apiStatus.type = 'error'; apiStatus.errorType = 'key'; return; }
 
             apiStatus.loading = true;
+            // 规范化 URL
             let baseUrl = props.apiConfig.endpoint.trim().replace(/\/+$/, '');
             if (baseUrl.endsWith('/v1')) baseUrl = baseUrl.slice(0, -3);
 
             try {
+                // 1. 获取模型列表
                 const listRes = await fetch(`${baseUrl}/v1/models`, {
                     method: 'GET',
                     headers: { 'Authorization': `Bearer ${props.apiConfig.key}` }
                 });
 
-                if (!listRes.ok) throw new Error(`获取列表失败 (状态码: ${listRes.status})`);
+                if (!listRes.ok) {
+                   if (listRes.status === 401) throw new Error('获取列表失败：密钥无效 (401)');
+                   throw new Error(`获取列表失败 (状态码: ${listRes.status})`);
+                }
                 const listData = await listRes.json();
+                
+                // 严格检查返回数据结构
+                if (!listData.data || !Array.isArray(listData.data)) throw new Error('模型列表格式异常');
                 
                 const candidates = listData.data.map(m => m.id).sort();
                 if (candidates.length === 0) throw new Error('未找到可用模型');
 
-                // 简单的验证逻辑
+                // 2. 选择一个非 Embedding/Dall-E 模型进行测试
                 let testModel = candidates.find(m => {
                     const low = m.toLowerCase();
                     return !low.includes('embedding') && !low.includes('dall-e') && !low.includes('whisper');
                 }) || candidates[0];
 
+                // 3. 发送真实对话请求验证 (Verify)
                 const verifyRes = await fetch(`${baseUrl}/v1/chat/completions`, {
                     method: 'POST',
                     headers: { 'Authorization': `Bearer ${props.apiConfig.key}`, 'Content-Type': 'application/json' },
                     body: JSON.stringify({ model: testModel, messages: [{role: "user", content: "hi"}], max_tokens: 1 })
                 });
 
-                if (!verifyRes.ok) throw new Error(`验证未通过 (状态码: ${verifyRes.status})`);
+                if (!verifyRes.ok) {
+                    if (verifyRes.status === 401) throw new Error('密钥错误或无效 (401)');
+                    if (verifyRes.status === 429) throw new Error('密钥有效但无额度 (429)');
+                    throw new Error(`验证未通过 (状态码: ${verifyRes.status})`);
+                }
                 
+                const verifyData = await verifyRes.json();
+                // 严格检查业务错误
+                if (verifyData.error) throw new Error(`验证失败: ${verifyData.error.message || '服务器返回错误'}`);
+                if (!verifyData.choices || verifyData.choices.length === 0) throw new Error('验证失败: 响应内容不符合预期');
+
+                // 4. 验证全部通过
                 emit('update:modelList', candidates);
                 apiStatus.msg = '✅ 验证通过，密钥有效';
                 apiStatus.type = 'success';
-                props.apiConfig.model = testModel;
+                
+                if (!props.apiConfig.model || !candidates.includes(props.apiConfig.model)) {
+                    props.apiConfig.model = testModel; 
+                }
 
             } catch (e) {
+                // 5. 错误处理
                 apiStatus.msg = `❌ ${e.message}`;
                 apiStatus.type = 'error';
-                if (e.message.includes('密钥') || e.message.includes('401')) apiStatus.errorType = 'key';
-                else apiStatus.errorType = 'url';
+                if (e.message.includes('密钥') || e.message.includes('401') || e.message.includes('429')) {
+                    apiStatus.errorType = 'key';
+                } else if (e.message.includes('地址') || e.message.includes('fetch')) {
+                    apiStatus.errorType = 'url';
+                }
+                emit('update:modelList', []);
+                props.apiConfig.model = '';
             } finally {
                 apiStatus.loading = false;
             }
         };
+
+        // 初始化溫度值（如果未設置則預設為 1）
+        if (props.apiConfig.temperature === undefined) {
+            props.apiConfig.temperature = 1;
+        }
 
         return { apiStatus, saveCurrentApi, loadSavedApi, deleteSavedApi, fetchModels };
     },
@@ -144,6 +178,21 @@ export default {
                         <option v-for="m in modelList" :key="m" :value="m">{{ m }}</option>
                     </select>
                     <span class="item-arrow" v-if="modelList.length === 0">🔒</span>
+                </div>
+                <!-- 新增溫度調整條 -->
+                <div class="settings-item" style="margin-top: 16px;">
+                    <span class="item-label">温度</span>
+                    <input
+                        type="range"
+                        min="0.1"
+                        max="2"
+                        step="0.1"
+                        v-model.number="apiConfig.temperature"
+                        style="width: 150px; margin: 0 10px;"
+                    >
+                    <span style="font-size: 13px; color: #007aff; min-width: 32px; display: inline-block; text-align: right;">
+                        {{ apiConfig.temperature.toFixed(1) }}
+                    </span>
                 </div>
             </div>
         </div>
