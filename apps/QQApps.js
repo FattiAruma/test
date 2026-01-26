@@ -199,10 +199,13 @@ export default {
         };
 
         const pushMessage = (chat, role, type, content, extra = {}) => {
+            const now = new Date();
+            const timeStr = now.getHours() + ':' + String(now.getMinutes()).padStart(2, '0');
             const msg = {
                 role,
                 type: type || 'text',
                 content,
+                time: timeStr,
                 ...extra
             };
             chat.messages.push(msg);
@@ -818,6 +821,17 @@ const generateHiddenThought = async (chat, baseUrl) => {
             if(confirm("确定删除这条记忆吗？")) tempQQSettings.memoryList.splice(index, 1);
         };
 
+        // 新增：清空聊天记录和心声（保留长期记忆）
+        const clearChatHistory = () => {
+            if (!confirm("确定要清空聊天记录和心声吗？\n\n注意：长期记忆总结会保留，但所有聊天消息和心声历史将被删除。")) return;
+            tempQQSettings.messages = [];
+            tempQQSettings.heartThoughts = [];
+            tempQQSettings.lastMsg = '';
+            tempQQSettings.lastTime = '';
+            tempQQSettings.msgCountSinceSummary = 0;
+            alert("已清空聊天记录和心声！");
+        };
+
         // --- 交互功能 ---
         const handleMsgTouchStart = (e, index) => {
             if(isMultiSelectMode.value) return;
@@ -1167,7 +1181,9 @@ const deleteHeartEntry = (chat, idx) => {
             isStickerSettingsOpen, stickerSettingsTab, tempStickerInput, addBatchStickers, deleteAiSticker,
             isUserStickerPickerOpen, isUserStickerManageMode, userStickerInput, addUserBatchStickers, sendUserSticker,
             // 心聲相關
-            isHeartModalOpen, isHeartHistoryOpen, openHeartModal, deleteHeartEntry
+            isHeartModalOpen, isHeartHistoryOpen, openHeartModal, deleteHeartEntry,
+            // 清空聊天记录
+            clearChatHistory
         };
     },
     template: `
@@ -1222,19 +1238,22 @@ const deleteHeartEntry = (chat, idx) => {
                 </div>
                 <!-- ✅ 新增：粉色愛心按鈕（齒輪左側） -->
                 <div style="position: absolute; right: 54px; bottom: 8px; z-index: 11;">
-                    <button @click.stop="openHeartModal" title="心聲" style="width:36px; height:36px; border-radius:50%; border:none; background: linear-gradient(135deg,#ff9ac2,#ff6fa3); display:flex; align-items:center; justify-content:center; box-shadow:0 1px 6px rgba(255,102,170,0.18);">
+                    <button @click.stop="openHeartModal" title="心聲" style="width:28px; height:28px; border-radius:50%; border:none; background: linear-gradient(135deg,#ff9ac2,#ff6fa3); display:flex; align-items:center; justify-content:center; box-shadow:0 1px 6px rgba(255,102,170,0.18);">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12.1 21.35l-1.1-1.02C5.14 15.24 2 12.39 2 8.99 2 6.42 4.24 4.5 6.76 4.5c1.54 0 3.04.99 3.74 2.44.7-1.45 2.2-2.44 3.74-2.44C19.76 4.5 22 6.42 22 8.99c0 3.4-3.14 6.25-8.99 11.34l-1.01 1.02z"/>
                         </svg>
                     </button>
                 </div>
-                <div class="app-header-close" @click="openQQSettings" style="font-size: 20px; position: absolute; right: 15px; bottom: 8px; z-index: 10;">
+                <div class="app-header-close" @click="openQQSettings" style="font-size: 25px; position: absolute; right: 15px; bottom: 8px; z-index: 10;">
                     ⚙️
                     <div v-if="showSummaryAlert" style="position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; background: red; border-radius: 50%; border: 1px solid white;"></div>
                 </div>
             </div>
 
             <div class="chat-scroll-area" ref="chatContainer" style="padding-bottom: 10px;">
+                <!-- ✅ 动态注入当前聊天的自定义CSS，使用 scoped 属性确保样式隔离 -->
+                <component :is="'style'" v-if="getCurrentChat().customCSS">{{ getCurrentChat().customCSS }}</component>
+                
                 <div v-for="(msg, index) in getCurrentChat().messages" :key="index" 
                      class="chat-row"
                      style="display:flex; width: 100%; margin-bottom: 6px; align-items: flex-start; position: relative;"
@@ -1272,36 +1291,39 @@ const deleteHeartEntry = (chat, idx) => {
                     <!-- 语音消息 (展开式) -->
                     <div v-else-if="msg.type === 'voice'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
                         <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')' }"></div>
-                        <div class="chat-bubble"
-                             @touchstart="handleMsgTouchStart($event, index)"
-                             @touchend="handleMsgTouchEnd"
-                             @touchcancel="handleMsgTouchEnd"
-                             @contextmenu.prevent="showContextMenu($event, index)"
-                             @click="toggleVoiceText(msg)"
-                             style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; display: flex; flex-direction: column; min-width: 60px; padding: 10px 12px;"
-                             :style="{ width: (msg.isVoiceTextVisible ? 'auto' : (60 + msg.duration * 5) + 'px'), maxWidth: '240px' }"
-                        >
-                            <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-                                <template v-if="msg.role !== 'user'">
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="transform: rotate(180deg);">
-                                        <path d="M12 4L12 20M8 7L8 17M4 10L4 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                                        <path d="M16 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
-                                        <path d="M20 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
-                                    </svg>
-                                    <span style="font-weight: bold; margin-left: 5px;">{{ msg.duration }}"</span>
-                                </template>
-                                <template v-else>
-                                    <span style="font-weight: bold; margin-right: 5px;">{{ msg.duration }}"</span>
-                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                                        <path d="M3 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
-                                        <path d="M-1 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
-                                        <path d="M3 12a3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3 3 3 0 0 1-3-3" fill="currentColor" />
-                                    </svg>
-                                </template>
-                            </div>
-                            <div v-if="msg.isVoiceTextVisible" 
-                                 style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.1); font-size: 14px; text-align: left; line-height: 1.4; white-space: pre-wrap; word-break: break-all;">
-                                {{ msg.voiceText }}
+                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                            <div v-if="msg.time" style="font-size: 11px; color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div class="chat-bubble"
+                                 @touchstart="handleMsgTouchStart($event, index)"
+                                 @touchend="handleMsgTouchEnd"
+                                 @touchcancel="handleMsgTouchEnd"
+                                 @contextmenu.prevent="showContextMenu($event, index)"
+                                 @click="toggleVoiceText(msg)"
+                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; display: flex; flex-direction: column; min-width: 60px; padding: 10px 12px;"
+                                 :style="{ width: (msg.isVoiceTextVisible ? 'auto' : (60 + msg.duration * 5) + 'px'), maxWidth: '240px' }"
+                            >
+                                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                                    <template v-if="msg.role !== 'user'">
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="transform: rotate(180deg);">
+                                            <path d="M12 4L12 20M8 7L8 17M4 10L4 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                            <path d="M16 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
+                                            <path d="M20 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
+                                        </svg>
+                                        <span style="font-weight: bold; margin-left: 5px;">{{ msg.duration }}"</span>
+                                    </template>
+                                    <template v-else>
+                                        <span style="font-weight: bold; margin-right: 5px;">{{ msg.duration }}"</span>
+                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M3 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
+                                            <path d="M-1 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
+                                            <path d="M3 12a3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3 3 3 0 0 1-3-3" fill="currentColor" />
+                                        </svg>
+                                    </template>
+                                </div>
+                                <div v-if="msg.isVoiceTextVisible" 
+                                     style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.1); font-size: 14px; text-align: left; line-height: 1.4; white-space: pre-wrap; word-break: break-all;">
+                                    {{ msg.voiceText }}
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1309,73 +1331,90 @@ const deleteHeartEntry = (chat, idx) => {
                     <!-- 红包 -->
                     <div v-else-if="msg.type === 'redpacket'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
                         <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')' }"></div>
-                        <div class="chat-bubble"
-                             @touchstart="handleMsgTouchStart($event, index)"
-                             @touchend="handleMsgTouchEnd"
-                             @contextmenu.prevent="showContextMenu($event, index)"
-                             style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: #ea5f39; border: none; overflow: hidden; width: 230px; border-radius: 8px;"
-                        >
-                            <div style="padding: 15px 12px; display: flex; align-items: center;">
-                                <div style="width: 36px; height: 42px; background: #febb53; border-radius: 4px; display: flex; justify-content: center; align-items: center; margin-right: 12px; color: #ea5f39; font-weight: bold; font-size: 18px;">開</div>
-                                <div style="color: white; font-size: 15px; font-weight: 500;">{{ msg.packetText }}</div>
+                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                            <div v-if="msg.time" style="font-size: 11px; color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div class="chat-bubble"
+                                 @touchstart="handleMsgTouchStart($event, index)"
+                                 @touchend="handleMsgTouchEnd"
+                                 @contextmenu.prevent="showContextMenu($event, index)"
+                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: #ea5f39; border: none; overflow: hidden; width: 230px; border-radius: 8px;"
+                            >
+                                <div style="padding: 15px 12px; display: flex; align-items: center;">
+                                    <div style="width: 36px; height: 42px; background: #febb53; border-radius: 4px; display: flex; justify-content: center; align-items: center; margin-right: 12px; color: #ea5f39; font-weight: bold; font-size: 18px;">開</div>
+                                    <div style="color: white; font-size: 15px; font-weight: 500;">{{ msg.packetText }}</div>
+                                </div>
+                                <div style="background: white; padding: 4px 12px; font-size: 10px; color: #999;">微信红包</div>
                             </div>
-                            <div style="background: white; padding: 4px 12px; font-size: 10px; color: #999;">微信红包</div>
                         </div>
                     </div>
 
                     <!-- 转账 -->
                     <div v-else-if="msg.type === 'transfer'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
                         <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')' }"></div>
-                        <div class="chat-bubble"
-                             @touchstart="handleMsgTouchStart($event, index)"
-                             @touchend="handleMsgTouchEnd"
-                             @contextmenu.prevent="showContextMenu($event, index)"
-                             style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: #f9b040; border: none; overflow: hidden; width: 230px; border-radius: 8px;"
-                        >
-                            <div style="padding: 15px 12px; display: flex; align-items: center;">
-                                <div style="width: 38px; height: 38px; border: 2px solid white; border-radius: 50%; display: flex; justify-content: center; align-items: center; margin-right: 12px; color: white;">
-                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                            <div v-if="msg.time" style="font-size: 11px; color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div class="chat-bubble"
+                                 @touchstart="handleMsgTouchStart($event, index)"
+                                 @touchend="handleMsgTouchEnd"
+                                 @contextmenu.prevent="showContextMenu($event, index)"
+                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: #f9b040; border: none; overflow: hidden; width: 230px; border-radius: 8px;"
+                            >
+                                <div style="padding: 15px 12px; display: flex; align-items: center;">
+                                    <div style="width: 38px; height: 38px; border: 2px solid white; border-radius: 50%; display: flex; justify-content: center; align-items: center; margin-right: 12px; color: white;">
+                                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                                    </div>
+                                    <div style="color: white; font-size: 15px; display: flex; flex-direction: column;">
+                                        <span style="font-size: 16px;">¥{{ msg.amount }}</span>
+                                        <span style="font-size: 11px; opacity: 0.9;">转账给你</span>
+                                    </div>
                                 </div>
-                                <div style="color: white; font-size: 15px; display: flex; flex-direction: column;">
-                                    <span style="font-size: 16px;">¥{{ msg.amount }}</span>
-                                    <span style="font-size: 11px; opacity: 0.9;">转账给你</span>
-                                </div>
+                                <div style="background: white; padding: 4px 12px; font-size: 10px; color: #999;">微信转账</div>
                             </div>
-                            <div style="background: white; padding: 4px 12px; font-size: 10px; color: #999;">微信转账</div>
                         </div>
                     </div>
 
                     <!-- 表情包 (纯图片，无背景) -->
                     <div v-else-if="msg.type === 'sticker'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
                         <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')' }"></div>
-                         <div class="chat-bubble"
-                             @touchstart="handleMsgTouchStart($event, index)"
-                             @touchend="handleMsgTouchEnd"
-                             @contextmenu.prevent="showContextMenu($event, index)"
-                             style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: transparent; border: none; overflow: hidden;"
-                        >
-                            <img :src="msg.src" style="max-width: 150px; max-height: 150px; display: block; border-radius: 4px;">
+                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                            <div v-if="msg.time" style="font-size: 11px; color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div class="chat-bubble"
+                                 @touchstart="handleMsgTouchStart($event, index)"
+                                 @touchend="handleMsgTouchEnd"
+                                 @contextmenu.prevent="showContextMenu($event, index)"
+                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: transparent; border: none; overflow: hidden;"
+                            >
+                                <img :src="msg.src" style="max-width: 150px; max-height: 150px; display: block; border-radius: 4px;">
+                            </div>
                         </div>
                     </div>
 
                     <!-- 图片 (描述卡片) -->
                     <div v-else-if="msg.type === 'image'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
                         <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')' }"></div>
-                        <div class="chat-bubble"
-                             @touchstart="handleMsgTouchStart($event, index)"
-                             @touchend="handleMsgTouchEnd"
-                             @contextmenu.prevent="showContextMenu($event, index)"
-                             style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: transparent; border: none; overflow: hidden;"
-                        >
-                            <img v-if="msg.imgType === 'local'" :src="msg.src" style="max-width: 150px; max-height: 200px; border-radius: 8px; display: block;">
-                            <div v-else 
-                                 @click.stop="openTextViewer(msg.description)"
-                                 style="background: #f2f2f2; border-radius: 8px; width: 140px; height: 140px; display: flex; justify-content: center; align-items: center; cursor: pointer; border: 1px solid #e0e0e0;">
-                                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                                    <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                                    <polyline points="21 15 16 10 5 21"></polyline>
-                                </svg>
+                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                            <div v-if="msg.time" style="font-size: 11px; color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div class="chat-bubble"
+                                 @touchstart="handleMsgTouchStart($event, index)"
+                                 @touchend="handleMsgTouchEnd"
+                                 @contextmenu.prevent="showContextMenu($event, index)"
+                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: transparent; border: none; overflow: hidden;"
+                            >
+                                <img v-if="msg.imgType === 'local'" :src="msg.src" style="max-width: 150px; max-height: 200px; border-radius: 8px; display: block;">
+                                <div v-else 
+                                     @click.stop="openTextViewer(msg.description)"
+                                     @touchstart.stop
+                                     @touchend.stop="openTextViewer(msg.description)"
+                                     style="background: #f2f2f2; border-radius: 8px; width: 140px; height: 140px; display: flex; justify-content: center; align-items: center; cursor: pointer; border: 1px solid #e0e0e0; transition: background 0.2s;"
+                                     @mouseenter="$event.target.style.background='#e8e8e8'"
+                                     @mouseleave="$event.target.style.background='#f2f2f2'"
+                                >
+                                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                                        <polyline points="21 15 16 10 5 21"></polyline>
+                                    </svg>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1383,22 +1422,25 @@ const deleteHeartEntry = (chat, idx) => {
                     <!-- 位置 -->
                     <div v-else-if="msg.type === 'location'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
                         <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')' }"></div>
-                        <div class="chat-bubble"
-                             @touchstart="handleMsgTouchStart($event, index)"
-                             @touchend="handleMsgTouchEnd"
-                             @contextmenu.prevent="showContextMenu($event, index)"
-                             style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: white; border: 1px solid #ddd; overflow: hidden; width: 220px; border-radius: 8px;"
-                        >
-                            <div style="height: 100px; position: relative; background-color: #f2f1ed; background-image: linear-gradient(#dcdcdc 1px, transparent 1px), linear-gradient(90deg, #dcdcdc 1px, transparent 1px); background-size: 20px 20px;">
-                                <div style="position: absolute; top: 30%; left: 0; width: 100%; height: 15px; background: #aadaff; transform: rotate(-5deg);"></div>
-                                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); font-size: 24px; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));">
-                                    📍
+                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                            <div v-if="msg.time" style="font-size: 11px; color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div class="chat-bubble"
+                                 @touchstart="handleMsgTouchStart($event, index)"
+                                 @touchend="handleMsgTouchEnd"
+                                 @contextmenu.prevent="showContextMenu($event, index)"
+                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: white; border: 1px solid #ddd; overflow: hidden; width: 220px; border-radius: 8px;"
+                            >
+                                <div style="height: 100px; position: relative; background-color: #f2f1ed; background-image: linear-gradient(#dcdcdc 1px, transparent 1px), linear-gradient(90deg, #dcdcdc 1px, transparent 1px); background-size: 20px 20px;">
+                                    <div style="position: absolute; top: 30%; left: 0; width: 100%; height: 15px; background: #aadaff; transform: rotate(-5deg);"></div>
+                                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); font-size: 24px; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));">
+                                        📍
+                                    </div>
                                 </div>
-                            </div>
-                            <div style="padding: 10px;">
-                                <div style="font-weight: bold; font-size: 14px; margin-bottom: 4px; color: #000;">{{ msg.locEnd }}</div>
-                                <div style="font-size: 11px; color: #888;">
-                                    {{ msg.locStart }} -> {{ msg.locVia ? msg.locVia + ' -> ' : '' }}{{ msg.locEnd }}
+                                <div style="padding: 10px;">
+                                    <div style="font-weight: bold; font-size: 14px; margin-bottom: 4px; color: #000;">{{ msg.locEnd }}</div>
+                                    <div style="font-size: 11px; color: #888;">
+                                        {{ msg.locStart }} -> {{ msg.locVia ? msg.locVia + ' -> ' : '' }}{{ msg.locEnd }}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1431,14 +1473,22 @@ const deleteHeartEntry = (chat, idx) => {
 
                     <!-- 正常文字 -->
                     <div v-else class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')' }"></div>
-                        <div class="chat-bubble"
-                             @touchstart="handleMsgTouchStart($event, index)"
-                             @touchend="handleMsgTouchEnd"
-                             @touchcancel="handleMsgTouchEnd"
-                             @contextmenu.prevent="showContextMenu($event, index)"
-                             style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none;"
-                        >{{ msg.content }}</div>
+                        <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <!-- ✅ 添加 message-bubble 类和 content 子元素以支持CSS自定义 -->
+                            <div :class="['message-bubble', msg.role === 'user' ? 'user' : 'ai']">
+                                <div class="content"
+                                     @touchstart="handleMsgTouchStart($event, index)"
+                                     @touchend="handleMsgTouchEnd"
+                                     @touchcancel="handleMsgTouchEnd"
+                                     @contextmenu.prevent="showContextMenu($event, index)"
+                                     :style="!getCurrentChat().customCSS ? (msg.role === 'user' ? 'background: #0099FF; color: #fff; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;' : 'background: #fff; color: #000; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;') : 'font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;'"
+
+                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none;"
+                                >{{ msg.content }}</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -1526,7 +1576,7 @@ const deleteHeartEntry = (chat, idx) => {
         <div v-if="isHeartModalOpen" class="modal-overlay" style="z-index:2700; display:flex; align-items:center; justify-content:center; animation:none !important; transition:none !important;" @click.self="isHeartModalOpen = false">
             <div class="modal-content" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); transform-origin: center center; animation: none !important; transition: none !important; width: 82%; max-width: 900px; height: 82vh; background: white; border-radius: 12px; padding: 20px; display:flex; flex-direction:column; overflow-y:auto; box-shadow: 0 20px 60px rgba(0,0,0,0.32);">
                 <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <div style="font-weight: bold; font-size: 18px;">角色第一视角 · 心声</div>
+                    <div style="font-weight: bold; font-size: 18px;">角色心声</div>
                     <div style="display:flex; gap:8px; align-items:center;">
                         <button @click.stop="isHeartHistoryOpen = true" style="font-size:13px; border:none; background:none; color:#ff6fa3;">历史心声</button>
                         <button @click="isHeartModalOpen = false" style="font-size:13px; border:none; background:none; color:#666;">关闭</button>
@@ -1534,7 +1584,7 @@ const deleteHeartEntry = (chat, idx) => {
                 </div>
                 <div style="margin-top:14px; display:flex; flex-direction:column; gap:12px;">
                     <template v-if="getCurrentChat().heartThoughts && getCurrentChat().heartThoughts.length > 0">
-                        <div v-for="(key, idx) in ['clothing','behavior','thought','evil']" :key="key" style="background:#fff7fb; border:1px solid #ffe6f2; padding:14px; border-radius:10px;">
+                        <div v-for="(key, idx) in ['clothing','behavior','thought','evil']" :key="key" style="background:#fff7fb; border:1px solid #ffe6f2; padding:14px; border-rdius:10px;">
                             <div style="font-size:13px; color:#ff3b7a; font-weight:700; margin-bottom:6px;">
                                 {{ key === 'clothing' ? '衣着' : (key === 'behavior' ? '行为' : (key === 'thought' ? '心声' : '坏心思')) }}
                             </div>
@@ -1727,9 +1777,78 @@ const deleteHeartEntry = (chat, idx) => {
                     </div>
                 </div>
 
-                <div style="display:flex; gap:10px; margin-top: 15px;">
-                    <button class="modal-btn" style="color: #ff3b30; flex:1;" @click="deleteCurrentChat">删除好友</button>
-                    <button class="modal-btn" style="color: #34c759; flex:2;" @click="saveQQSettings">保存修改</button>
+                <!-- 字体大小调整 -->
+                <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
+                    <div style="font-weight:bold; font-size:14px; margin-bottom:10px;">字体大小调整</div>
+                    <div style="background: #f5f5f7; padding: 10px; border-radius: 8px;">
+                        <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
+                            <span style="font-size:12px; color:#666; min-width:60px;">字体大小</span>
+                            <input 
+                                type="range" 
+                                :value="tempQQSettings.fontSize || 16" 
+                                @input="tempQQSettings.fontSize = parseInt($event.target.value)"
+                                min="12" 
+                                max="24" 
+                                step="1"
+                                style="flex:1;"
+                            >
+                            <span style="font-size:12px; color:#333; min-width:40px; text-align:center; font-weight:bold;">{{ tempQQSettings.fontSize || 16 }}px</span>
+                        </div>
+                        <div style="font-size: 11px; color: #666;">
+                        </div>
+
+                        
+                    </div>
+                </div>
+
+                <!-- CSS自定义 -->
+                <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
+                    <div style="font-weight:bold; font-size:14px; margin-bottom:10px;">CSS 自定义气泡样式</div>
+                    <div style="background: #f5f5f7; padding: 10px; border-radius: 8px;">
+                        <textarea 
+                            v-model="tempQQSettings.customCSS" 
+                            class="qq-textarea" 
+                            placeholder=".message-bubble.user .content {&#10;  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);&#10;  color: white;&#10;}&#10;&#10;.message-bubble.ai .content {&#10;  background: #f0f0f0;&#10;  color: #333;&#10;}"
+                            style="height: 120px; font-family: 'Courier New', monospace; font-size: 12px;"
+                        ></textarea>
+                        <div style="font-size: 11px; color: #666; margin-top: 5px;">
+                            提示：使用 .message-bubble.user .content 和 .message-bubble.ai .content 来自定义气泡样式
+                        </div>
+                        
+                        <!-- 实时预览 -->
+                        <div style="margin-top: 15px; padding: 15px; background: white; border-radius: 8px; border: 1px solid #ddd;">
+                            <div style="font-size: 12px; color: #666; margin-bottom: 10px; text-align: center;">实时预览</div>
+                            <component :is="'style'" v-if="tempQQSettings.customCSS">{{ tempQQSettings.customCSS }}</component>
+                            
+                            <!-- AI气泡预览 -->
+                            <div style="display: flex; margin-bottom: 12px; align-items: flex-start;">
+                                <div style="width: 36px; height: 36px; border-radius: 50%; background: #ddd; margin-right: 10px; flex-shrink: 0;"></div>
+                                <div class="message-bubble ai">
+                                    <div class="content" :style="!tempQQSettings.customCSS ? 'background: white; color: #333; padding: 10px 12px; border-radius: 8px; max-width: 200px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);' : 'padding: 10px 12px; border-radius: 8px; max-width: 200px;'">
+                                        这是AI的消息气泡
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- 用户气泡预览 -->
+                            <div style="display: flex; margin-bottom: 0; align-items: flex-start; flex-direction: row-reverse;">
+                                <div style="width: 36px; height: 36px; border-radius: 50%; background: #ddd; margin-left: 10px; flex-shrink: 0;"></div>
+                                <div class="message-bubble user">
+                                    <div class="content" :style="!tempQQSettings.customCSS ? 'background: #0099ff; color: #333; padding: 10px 12px; border-radius: 8px; max-width: 200px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);' : 'padding: 10px 12px; border-radius: 8px; max-width: 200px;'">
+                                        这是用户的消息气泡
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div style="margin-top: 15px;">
+                    <button class="modal-btn" style="color: #34c759; width: 100%; margin-bottom: 10px;" @click="saveQQSettings">保存修改</button>
+                    <div style="display:flex; gap:10px;">
+                        <button class="modal-btn" style="color: #ff9500; flex:1;" @click="clearChatHistory">清空记录</button>
+                        <button class="modal-btn" style="color: #ff3b30; flex:1;" @click="deleteCurrentChat">删除好友</button>
+                    </div>
                 </div>
              </div>
         </div>
@@ -1850,6 +1969,17 @@ const deleteHeartEntry = (chat, idx) => {
              </div>
         </div>
 
+        <!-- 文本图片查看器 Modal -->
+        <div v-if="textViewer.visible" class="modal-overlay" style="z-index: 2850;" @click.self="textViewer.visible = false">
+            <div class="modal-content" style="max-width: 400px;">
+                <div class="modal-title">图片描述</div>
+                <div style="padding: 15px; background: #f9f9f9; border-radius: 8px; margin: 15px 0; white-space: pre-wrap; word-break: break-word; line-height: 1.6; max-height: 60vh; overflow-y: auto;">
+                    {{ textViewer.content }}
+                </div>
+                <button class="modal-btn" @click="textViewer.visible = false">关闭</button>
+            </div>
+        </div>
+
         <!-- 转发消息查看器 (居中长方形窗口) -->
         <div v-if="forwardViewer.visible" class="modal-overlay" style="z-index: 2800; display:flex; align-items:center; justify-content:center; animation:none !important; transition:none !important;" @click.self="forwardViewer.visible = false">
             <div class="modal-content" style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); transform-origin: center center; animation: none !important; transition: none !important; width: 85%; max-width: 500px; height: 75vh; background: white; border-radius: 12px; padding: 0; display:flex; flex-direction:column; overflow:hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.32);">
@@ -1879,7 +2009,7 @@ const deleteHeartEntry = (chat, idx) => {
                                 {{ item.name }}
                             </div>
                             <div :style="{ 
-                                     background: item.role === 'user' ? '#95ec69' : 'white',
+                                     background: item.role === 'user' ? '#0099ff' : 'white',
                                      color: '#333',
                                      padding: '10px 12px',
                                      borderRadius: '8px',

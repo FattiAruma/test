@@ -3,9 +3,10 @@ import { createApp, ref, reactive, computed, watch, onMounted } from 'https://un
 import QQApps from './apps/QQApps.js';
 import SettingsApp from './apps/SettingsApp.js';
 import ThemeApps from './apps/ThemeApps.js';
+import TypefaceApp from './apps/TypefaceApp.js';
 
 createApp({
-    components: { QQApps, SettingsApp, ThemeApps },
+    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp },
     setup() {
         // === 1. 定义默认数据 ===
         const defaultData = {
@@ -48,6 +49,7 @@ createApp({
         const desktopApps = reactive(JSON.parse(JSON.stringify(defaultData.desktopApps)));
         const dockApps = reactive(JSON.parse(JSON.stringify(defaultData.dockApps)));
         const textWidgets = reactive(JSON.parse(JSON.stringify(defaultData.textWidgets)));
+        const customFrames = reactive([]);
         
         const apiConfig = reactive({ ...defaultData.apiConfig });
         const modelList = ref([]);
@@ -58,6 +60,7 @@ createApp({
         const isQQOpen = ref(false);
         const isSettingsOpen = ref(false);
         const isBeautifyOpen = ref(false);
+        const isFontOpen = ref(false);
 
         // 弹窗控制
         const activeModal = ref(null);
@@ -117,6 +120,9 @@ createApp({
                     if(data.aiGeneralStickers) qqData.aiGeneralStickers = data.aiGeneralStickers;
                     if(data.userStickers) qqData.userStickers = data.userStickers;
                     
+                    // 恢复自定义头像框
+                    if(data.customFrames) customFrames.splice(0, customFrames.length, ...data.customFrames);
+                    
                     console.log("✅ 存檔讀取成功");
                 } catch (e) { console.error("讀取存檔失敗", e); }
             }
@@ -138,7 +144,9 @@ createApp({
                 qqChats: qqData.chatList,
                 // ★新增：保存表情包數據
                 aiGeneralStickers: qqData.aiGeneralStickers,
-                userStickers: qqData.userStickers
+                userStickers: qqData.userStickers,
+                // ★新增：保存自定义头像框
+                customFrames: customFrames
             };
             try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave)); } catch (e) {
                  if (e.name === 'QuotaExceededError') {
@@ -147,19 +155,55 @@ createApp({
             }
         };
 
+                // 生成自定义头像框样式
+        const generateCustomFrameStyles = () => {
+            let styleEl = document.getElementById('custom-frame-styles');
+            if (!styleEl) {
+                styleEl = document.createElement('style');
+                styleEl.id = 'custom-frame-styles';
+                document.head.appendChild(styleEl);
+            }
+            
+            let css = '';
+            customFrames.forEach((frameUrl, index) => {
+                css += `
+                    .avatar.custom-frame-${index}::before {
+                        content: '';
+                        position: absolute;
+                        inset: -8px;
+                        background-image: url('${frameUrl}');
+                        background-size: cover;
+                        background-position: center;
+                        z-index: -1;
+                    }
+                `;
+            });
+            styleEl.textContent = css;
+        };
+
+        
+        // 监听自定义头像框变化，更新样式
+        watch(customFrames, () => {
+            generateCustomFrameStyles();
+        }, { deep: true });
+
         // 监听变化自动保存
-        watch([wallpaper, avatar, profile, colors, photos, desktopApps, dockApps, textWidgets, apiConfig, modelList, savedApis, () => qqData.chatList, () => qqData.aiGeneralStickers, () => qqData.userStickers], () => {
+        watch([wallpaper, avatar, profile, colors, photos, desktopApps, dockApps, textWidgets, customFrames, apiConfig, modelList, savedApis, () => qqData.chatList, () => qqData.aiGeneralStickers, () => qqData.userStickers], () => {
             saveData();
         }, { deep: true });
 
-        // 挂载时读取
-        onMounted(() => loadData());
+        // 挂载时读取并生成样式
+        onMounted(() => {
+            loadData();
+            setTimeout(() => generateCustomFrameStyles(), 100);
+        });
 
         // 处理 App 点击
         const handleAppClick = (key) => {
             if (key === 'theme') isBeautifyOpen.value = true;
             else if (key === 'settings') isSettingsOpen.value = true;
             else if (key === 'qq') isQQOpen.value = true;
+            else if (key === 'font') isFontOpen.value = true;
         };
 
         // === 4. 强制链接上传逻辑 ===
@@ -202,6 +246,42 @@ createApp({
         // 其他 Modal 逻辑
         const openImageModal = (type, index) => { handleLinkUpload(type, index); }; 
         const setFrame = (f) => { avatar.frame = f; activeModal.value = null; };
+        
+        // 添加自定义头像框
+        const addCustomFrame = () => {
+            activeModal.value = null;
+            setTimeout(() => {
+                const url = prompt("请输入自定义头像框图片链接:", "https://");
+                if (url && url.trim() && url !== "https://") {
+                    customFrames.push(url);
+                    // 自动设置为新添加的头像框
+                    avatar.frame = 'custom-frame-' + (customFrames.length - 1);
+                }
+            }, 100);
+        };
+        
+        const deleteCustomFrame = (index) => {
+            if (confirm('确定要删除这个自定义头像框吗？')) {
+                // 如果当前使用的是要删除的头像框，切换到无头像框
+                if (avatar.frame === 'custom-frame-' + index) {
+                    avatar.frame = '';
+                }
+                // 如果使用的是后面的头像框，需要更新索引
+                else if (avatar.frame.startsWith('custom-frame-')) {
+                    const currentIndex = parseInt(avatar.frame.replace('custom-frame-', ''));
+                    if (currentIndex > index) {
+                        avatar.frame = 'custom-frame-' + (currentIndex - 1);
+                    }
+                }
+                
+                // 删除头像框
+                customFrames.splice(index, 1);
+                
+                // 重新生成样式
+                generateCustomFrameStyles();
+            }
+        };
+        
         const openSingleEdit = (key, label) => { editTargetKey.value = key; editTargetLabel.value = label; tempInputVal.value = profile[key]; activeModal.value = 'singleEdit'; };
         const saveSingleEdit = () => { if (editTargetKey.value) profile[editTargetKey.value] = tempInputVal.value; activeModal.value = null; };
         
@@ -212,7 +292,7 @@ createApp({
 
         // === 5. 安全的重置逻辑 (保留API) ===
         const resetBeautify = () => {
-            if(confirm("确定要重置美化设置吗？\n(包括桌面组件和卡片头像，但保留API设置)")) {
+            if(confirm("确定要重置美化设置吗？\n(包括桌面组件和卡片头像)")) {
                 // 暂停保存，防止重置过程中的中间状态被保存
                 isDataLoaded.value = false; 
 
@@ -237,7 +317,7 @@ createApp({
 
                 textWidgets.splice(0, textWidgets.length, ...JSON.parse(JSON.stringify(defaultData.textWidgets)));
                 
-                alert("✅ 美化已重置 (API配置已保留)");
+                alert("✅ 美化已重置");
                 
                 // 重置完成，恢复保存功能，并强制保存一次
                 isDataLoaded.value = true;
@@ -247,11 +327,12 @@ createApp({
 
         return {
             wallpaper, avatar, profile, colors, photos, desktopApps, dockApps, textWidgets,
-            isQQOpen, isSettingsOpen, isBeautifyOpen,
+            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen,
             activeModal, tempText, tempInputVal, editTargetLabel, fileInput,
             apiConfig, modelList, savedApis, qqData, themeState,
+            uploadTargetType, uploadTargetIndex, customFrames,
             handleAppClick, handleFileChange, handleLinkUpload, triggerFileUpload,
-            openImageModal, setFrame, openTextEdit, saveTextEdit, openSingleEdit, saveSingleEdit,
+            openImageModal, setFrame, addCustomFrame, deleteCustomFrame, openTextEdit, saveTextEdit, openSingleEdit, saveSingleEdit,
             getFlexAlign, handleThemeUpload, resetBeautify
         };
     }

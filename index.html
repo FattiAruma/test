@@ -84,6 +84,11 @@
             @close="isBeautifyOpen = false">
         </theme-apps>
 
+        <typeface-app 
+            :is-open="isFontOpen"
+            @close="isFontOpen = false">
+        </typeface-app>
+
         <!-- === 弹窗 === -->
         <div class="modal-overlay" v-if="activeModal === 'singleEdit'" @click.self="activeModal = null">
             <div class="modal-content">
@@ -109,10 +114,16 @@
                 <div class="modal-title">选择头像框</div>
                 <div class="frame-grid">
                     <div class="frame-option-container" @click="setFrame('')"><div class="frame-preview frame-none"></div><div class="frame-label">无</div></div>
+                    <div class="frame-option-container" @click="addCustomFrame"><div class="frame-preview frame-add">+</div><div class="frame-label">自定义</div></div>
                     <div class="frame-option-container" @click="setFrame('frame-pink')"><div class="frame-preview frame-pink"></div><div class="frame-label">简约粉</div></div>
                     <div class="frame-option-container" @click="setFrame('frame-gradient')"><div class="frame-preview frame-gradient"></div><div class="frame-label">梦幻紫</div></div>
                     <div class="frame-option-container" @click="setFrame('frame-stitch')"><div class="frame-preview frame-stitch"></div><div class="frame-label">缝纫风</div></div>
                     <div class="frame-option-container" @click="setFrame('frame-gold')"><div class="frame-preview frame-gold"></div><div class="frame-label">流光金</div></div>
+                    <div class="frame-option-container" v-for="(frameUrl, index) in customFrames" :key="'custom-' + index">
+                        <div class="frame-preview" :class="'custom-frame-' + index" :style="{ backgroundImage: 'url(' + frameUrl + ')', backgroundSize: 'cover', backgroundPosition: 'center' }" @click="setFrame('custom-frame-' + index)"></div>
+                        <div class="frame-label">自定义{{ index + 1 }}</div>
+                        <button class="delete-frame-btn" @click.stop="deleteCustomFrame(index)" title="删除此头像框">×</button>
+                    </div>
                 </div>
                 <button class="modal-btn cancel" @click="activeModal = null">返回</button>
             </div>
