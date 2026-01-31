@@ -4,9 +4,10 @@ import QQApps from './apps/QQApps.js';
 import SettingsApp from './apps/SettingsApp.js';
 import ThemeApps from './apps/ThemeApps.js';
 import TypefaceApp from './apps/TypefaceApp.js';
+import OtomegameApp from './apps/OtomegameApp.js';
 
 createApp({
-    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp },
+    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp, OtomegameApp },
     setup() {
         // === 1. 定义默认数据 ===
         const defaultData = {
@@ -22,7 +23,7 @@ createApp({
                 qq: { icon: '🐧', name: 'QQ', img: '' },
                 world: { icon: '📕', name: '世界书', img: '' },
                 phone: { icon: '📱', name: '查手机', img: '' },
-                game: { icon: '🎮', name: '小游戏', img: '' },
+                otomegame: { icon: '🎮', name: '恋爱轮盘', img: '' },
             },
             dockApps: {
                 settings: { icon: '⚙️', name: '设置', img: '' },
@@ -50,17 +51,49 @@ createApp({
         const dockApps = reactive(JSON.parse(JSON.stringify(defaultData.dockApps)));
         const textWidgets = reactive(JSON.parse(JSON.stringify(defaultData.textWidgets)));
         const customFrames = reactive([]);
+        const presetFrames = [
+            'https://i.postimg.cc/gcNzFt0D/Magic-Eraser-260125-110430.png',
+            'https://i.postimg.cc/JhVmc9Tj/Magic-Eraser-260125-105611.png',
+            'https://i.postimg.cc/gj8kWmBY/Magic-Eraser-260125-105728.png',
+            'https://i.postimg.cc/W1Xpj9S1/Magic-Eraser-260125-110308.png',
+            'https://i.postimg.cc/brYV5KF5/Magic_Eraser_260125_110639.png',
+            'https://i.postimg.cc/90XgkvNv/Magic_Eraser_260125_110709.png',
+            'https://i.postimg.cc/63D6BfC6/Magic_Eraser_260131_201545.png',
+            'https://i.postimg.cc/Y9J2tzQ4/Magic_Eraser_260131_201619.png',
+            'https://i.postimg.cc/qR9Bpx2h/Magic_Eraser_260131_201701.png',
+            'https://i.postimg.cc/50Z9fS8C/Magic_Eraser_260131_201734.png',
+            'https://i.postimg.cc/4dr4XQpH/Magic_Eraser_260131_201821.png',
+            'https://i.postimg.cc/W3Qpsw00/Magic_Eraser_260131_201859.png'
+        ];
         
         const apiConfig = reactive({ ...defaultData.apiConfig });
         const modelList = ref([]);
         const savedApis = ref([]);
-        const qqData = reactive({ chatList: [], currentChatId: null, inputMsg: '', isSending: false, aiGeneralStickers: [], userStickers: [] });
+        const qqData = reactive({ chatList: [], currentChatId: null, inputMsg: '', isSending: false, aiGeneralStickers: [], userStickers: [], universalWallpaper: '' });
         
         // App 开关状态
         const isQQOpen = ref(false);
         const isSettingsOpen = ref(false);
         const isBeautifyOpen = ref(false);
         const isFontOpen = ref(false);
+        const isOtomegameOpen = ref(false);
+
+        // 页面滑动
+        const currentPage = ref(0);
+        const touchstartX = ref(0);
+        const currentX = ref(0);
+        const dragX = ref(0);
+        const isDragging = ref(false);
+        const screenWidth = ref(window.innerWidth);
+
+        const screensContainerStyle = computed(() => {
+            const translateX = -currentPage.value * screenWidth.value + dragX.value;
+            const transition = isDragging.value ? 'none' : 'transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1)';
+            return {
+                transform: `translateX(${translateX}px)`,
+                transition: transition,
+            };
+        });
 
         // 弹窗控制
         const activeModal = ref(null);
@@ -78,7 +111,7 @@ createApp({
         const allApps = computed(() => ({ ...desktopApps, ...dockApps }));
         
         const themeState = reactive({
-            colors, allApps
+            colors, allApps, avatar, presetFrames, customFrames
         });
 
         const STORAGE_KEY = 'mySpaceData_v6_vue_split';
@@ -155,8 +188,8 @@ createApp({
             }
         };
 
-                // 生成自定义头像框样式
-        const generateCustomFrameStyles = () => {
+        // 生成头像框样式
+        const generateFrameStyles = () => {
             let styleEl = document.getElementById('custom-frame-styles');
             if (!styleEl) {
                 styleEl = document.createElement('style');
@@ -165,16 +198,47 @@ createApp({
             }
             
             let css = '';
+            
+            // 预设头像框
+            presetFrames.forEach((frameUrl, index) => {
+                // 检查是否是需要调整的特定头像框 (索引 6 到 11)
+                const isSpecialFrame = index >= 6 && index <= 11;
+                const transformStyle = isSpecialFrame 
+                    ? 'transform: translate(-50%, -57%) scale(1.07);' // 向上微调并放大
+                    : 'transform: translate(-50%, -50%);'; // 默认居中
+
+                css += `
+                    .avatar.preset-frame-${index}::before {
+                        content: '';
+                        position: absolute;
+                        top: 50%;
+                        left: 50%;
+                        width: calc(100% + 16px);
+                        height: calc(100% + 16px);
+                        background-image: url('${frameUrl}');
+                        background-size: cover;
+                        background-position: center;
+                        z-index: -1;
+                        ${transformStyle}
+                    }
+                `;
+            });
+
+            // 自定义头像框
             customFrames.forEach((frameUrl, index) => {
                 css += `
                     .avatar.custom-frame-${index}::before {
                         content: '';
                         position: absolute;
-                        inset: -8px;
+                        top: 50%;
+                        left: 50%;
+                        width: calc(100% + 16px);
+                        height: calc(100% + 16px);
                         background-image: url('${frameUrl}');
                         background-size: cover;
                         background-position: center;
                         z-index: -1;
+                        transform: translate(-50%, -50%);
                     }
                 `;
             });
@@ -184,7 +248,7 @@ createApp({
         
         // 监听自定义头像框变化，更新样式
         watch(customFrames, () => {
-            generateCustomFrameStyles();
+            generateFrameStyles();
         }, { deep: true });
 
         // 监听变化自动保存
@@ -195,8 +259,62 @@ createApp({
         // 挂载时读取并生成样式
         onMounted(() => {
             loadData();
-            setTimeout(() => generateCustomFrameStyles(), 100);
+            setTimeout(() => generateFrameStyles(), 100);
+            
+            // 添加滑动事件监听
+            const screensWrapper = document.querySelector('.screens-wrapper');
+            if (screensWrapper) {
+                screensWrapper.addEventListener('touchstart', handleTouchStart, { passive: false });
+                screensWrapper.addEventListener('touchmove', handleTouchMove, { passive: false });
+                screensWrapper.addEventListener('touchend', handleTouchEnd, { passive: false });
+            }
+            window.addEventListener('resize', () => {
+                screenWidth.value = window.innerWidth;
+            });
         });
+
+        // 滑动逻辑
+        const handleTouchStart = (e) => {
+            // 如果事件发生在可滚动元素内部，则不启动拖动
+            if (e.target.closest('.app-window, .modal-overlay')) return;
+            
+            isDragging.value = true;
+            touchstartX.value = e.touches[0].clientX;
+            currentX.value = e.touches[0].clientX;
+        };
+
+        const handleTouchMove = (e) => {
+            if (!isDragging.value) return;
+            
+            // 阻止页面默认的上下滚动行为，以优化左右滑动体验
+            e.preventDefault();
+
+            const dx = e.touches[0].clientX - currentX.value;
+            currentX.value = e.touches[0].clientX;
+            dragX.value += dx;
+        };
+
+        const handleTouchEnd = (e) => {
+            if (!isDragging.value) return;
+
+            isDragging.value = false;
+            const swipeThreshold = 50; // 调整滑动阈值，50px 应该会灵敏很多
+
+            if (dragX.value < -swipeThreshold) {
+                // 向左滑，切换到下一页
+                if (currentPage.value < 1) {
+                    currentPage.value++;
+                }
+            } else if (dragX.value > swipeThreshold) {
+                // 向右滑，切换到上一页
+                if (currentPage.value > 0) {
+                    currentPage.value--;
+                }
+            }
+
+            // 重置拖动距离
+            dragX.value = 0;
+        };
 
         // 处理 App 点击
         const handleAppClick = (key) => {
@@ -204,6 +322,7 @@ createApp({
             else if (key === 'settings') isSettingsOpen.value = true;
             else if (key === 'qq') isQQOpen.value = true;
             else if (key === 'font') isFontOpen.value = true;
+            else if (key === 'otomegame') isOtomegameOpen.value = true;
         };
 
         // === 4. 强制链接上传逻辑 ===
@@ -234,6 +353,8 @@ createApp({
                 const key = uploadTargetIndex.value;
                 if (desktopApps[key]) desktopApps[key].img = url;
                 if (dockApps[key]) dockApps[key].img = url;
+            } else if (uploadTargetType.value === 'qq-wallpaper-universal') {
+                qqData.universalWallpaper = url;
             }
             activeModal.value = null;
         };
@@ -241,6 +362,17 @@ createApp({
         const handleThemeUpload = (payload) => {
             if (payload.type === 'wallpaper-menu') handleLinkUpload('wallpaper');
             else if (payload.type === 'icon') handleLinkUpload('icon', payload.key);
+            else if (payload.type === 'wallpaper-qq-universal') handleLinkUpload('qq-wallpaper-universal');
+        };
+        
+        const handleFrameAction = (payload) => {
+            if (payload.type === 'set') {
+                setFrame(payload.frame);
+            } else if (payload.type === 'add') {
+                addCustomFrame();
+            } else if (payload.type === 'delete') {
+                deleteCustomFrame(payload.index);
+            }
         };
 
         // 其他 Modal 逻辑
@@ -278,7 +410,7 @@ createApp({
                 customFrames.splice(index, 1);
                 
                 // 重新生成样式
-                generateCustomFrameStyles();
+                generateFrameStyles();
             }
         };
         
@@ -327,13 +459,15 @@ createApp({
 
         return {
             wallpaper, avatar, profile, colors, photos, desktopApps, dockApps, textWidgets,
-            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen,
+            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen,
             activeModal, tempText, tempInputVal, editTargetLabel, fileInput,
             apiConfig, modelList, savedApis, qqData, themeState,
-            uploadTargetType, uploadTargetIndex, customFrames,
+            uploadTargetType, uploadTargetIndex, customFrames, presetFrames,
+            currentPage,
+            screensContainerStyle, // 导出样式
             handleAppClick, handleFileChange, handleLinkUpload, triggerFileUpload,
             openImageModal, setFrame, addCustomFrame, deleteCustomFrame, openTextEdit, saveTextEdit, openSingleEdit, saveSingleEdit,
-            getFlexAlign, handleThemeUpload, resetBeautify
+            getFlexAlign, handleThemeUpload, resetBeautify, handleFrameAction
         };
     }
 }).mount('#app');

@@ -18,36 +18,56 @@
         <!-- 壁纸 -->
         <div id="wallpaper-layer" :style="{ backgroundImage: 'url(' + wallpaper + ')' }"></div>
 
-        <!-- 桌面顶部 -->
-        <div class="widget-area">
-            <div class="avatar" :class="avatar.frame" :style="avatar.img ? { backgroundImage: 'url(' + avatar.img + ')' } : {}" @click="activeModal = 'image'; uploadTargetType = 'avatar'">
-                <span v-if="!avatar.img">🎀</span>
+        <!-- 桌面布局 -->
+        <div class="screens-wrapper">
+            <div class="screens-container" :style="screensContainerStyle">
+                <div class="screen">
+                    <!-- 桌面顶部 -->
+                    <div class="widget-area">
+                        <div class="avatar" :class="avatar.frame" :style="avatar.img ? { backgroundImage: 'url(' + avatar.img + ')' } : {}" @click="activeModal = 'image'; uploadTargetType = 'avatar'">
+                            <span v-if="!avatar.img">🎀</span>
+                        </div>
+                        <div class="user-name" :style="{ color: colors.header }" @click="openSingleEdit('name', '名字')">{{ profile.name }}</div>
+                        <div class="user-bio" :style="{ color: colors.header }" @click="openSingleEdit('bio1', '第一行简介')">{{ profile.bio1 }}</div>
+                        <div class="user-bio" style="margin-top: 2px;" :style="{ color: colors.header }" @click="openSingleEdit('bio2', '第二行简介')">{{ profile.bio2 }}</div>
+                    </div>
+                    <div class="layout-container">
+                        <div class="photo-widget photo-1" :style="{ backgroundImage: 'url(' + photos[0] + ')' }" @click="activeModal = 'image'; uploadTargetType = 'photo'; uploadTargetIndex = 0"></div>
+                        
+                        <div class="app-item" v-for="(app, key) in desktopApps" :key="key" @click="handleAppClick(key)">
+                            <div class="app-icon" :style="[app.img ? { backgroundImage: 'url(' + app.img + ')' } : {}, { color: colors.app }]"><span v-if="!app.img">{{ app.icon }}</span></div>
+                            <span class="app-name" :style="{ color: colors.app }">{{ app.name }}</span>
+                        </div>
+            
+                        <div class="glass-box text-widget" @click="openTextEdit(0)" :style="{ alignItems: getFlexAlign(textWidgets[0].align), textAlign: textWidgets[0].align }">
+                            <div class="text-title" :style="{ color: colors.widget }">{{ textWidgets[0].title }}</div>
+                            <div class="text-desc" :style="{ color: colors.widget }">{{ textWidgets[0].desc }}</div>
+                        </div>
+                        
+                        <div class="photo-widget photo-2" style="grid-row: 3 / span 2; grid-column: 3 / span 2;" :style="{ backgroundImage: 'url(' + photos[1] + ')' }" @click="activeModal = 'image'; uploadTargetType = 'photo'; uploadTargetIndex = 1"></div>
+                        
+                        <div class="glass-box text-widget" @click="openTextEdit(1)" :style="{ alignItems: getFlexAlign(textWidgets[1].align), textAlign: textWidgets[1].align }">
+                            <div class="text-title" :style="{ color: colors.widget }">{{ textWidgets[1].title }}</div>
+                            <div class="text-desc" :style="{ color: colors.widget }">{{ textWidgets[1].desc }}</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="screen">
+                    <div class="layout-container">
+                        <!-- 第二页内容 -->
+                        <div class="glass-box text-widget" style="grid-column: span 4; text-align: center; align-self: start; padding: 20px;">
+                            <div class="text-title" style="font-size: 18px;">第二页</div>
+                            <div class="text-desc" style="font-size: 14px; margin-top: 8px;">这里是第二页，可以放置更多应用和小组件。</div>
+                        </div>
+                    </div>
+                </div>
             </div>
-            <div class="user-name" :style="{ color: colors.header }" @click="openSingleEdit('name', '名字')">{{ profile.name }}</div>
-            <div class="user-bio" :style="{ color: colors.header }" @click="openSingleEdit('bio1', '第一行简介')">{{ profile.bio1 }}</div>
-            <div class="user-bio" style="margin-top: 2px;" :style="{ color: colors.header }" @click="openSingleEdit('bio2', '第二行简介')">{{ profile.bio2 }}</div>
         </div>
 
-        <!-- 桌面布局 -->
-        <div class="layout-container">
-            <div class="photo-widget photo-1" :style="{ backgroundImage: 'url(' + photos[0] + ')' }" @click="activeModal = 'image'; uploadTargetType = 'photo'; uploadTargetIndex = 0"></div>
-            
-            <div class="app-item" v-for="(app, key) in desktopApps" :key="key" @click="handleAppClick(key)">
-                <div class="app-icon" :style="[app.img ? { backgroundImage: 'url(' + app.img + ')' } : {}, { color: colors.app }]"><span v-if="!app.img">{{ app.icon }}</span></div>
-                <span class="app-name" :style="{ color: colors.app }">{{ app.name }}</span>
-            </div>
-
-            <div class="glass-box text-widget" @click="openTextEdit(0)" :style="{ alignItems: getFlexAlign(textWidgets[0].align), textAlign: textWidgets[0].align }">
-                <div class="text-title" :style="{ color: colors.widget }">{{ textWidgets[0].title }}</div>
-                <div class="text-desc" :style="{ color: colors.widget }">{{ textWidgets[0].desc }}</div>
-            </div>
-            
-            <div class="photo-widget photo-2" style="grid-row: 3 / span 2; grid-column: 3 / span 2;" :style="{ backgroundImage: 'url(' + photos[1] + ')' }" @click="activeModal = 'image'; uploadTargetType = 'photo'; uploadTargetIndex = 1"></div>
-            
-            <div class="glass-box text-widget" @click="openTextEdit(1)" :style="{ alignItems: getFlexAlign(textWidgets[1].align), textAlign: textWidgets[1].align }">
-                <div class="text-title" :style="{ color: colors.widget }">{{ textWidgets[1].title }}</div>
-                <div class="text-desc" :style="{ color: colors.widget }">{{ textWidgets[1].desc }}</div>
-            </div>
+        <!-- 页面指示器 -->
+        <div class="pagination-dots">
+            <span class="dot" :class="{ active: currentPage === 0 }" @click="currentPage = 0"></span>
+            <span class="dot" :class="{ active: currentPage === 1 }" @click="currentPage = 1"></span>
         </div>
 
         <!-- 底部 Dock -->
@@ -89,6 +109,13 @@
             @close="isFontOpen = false">
         </typeface-app>
 
+        <otomegame-app 
+            :is-open="isOtomegameOpen"
+            :qq-data="qqData"
+            :api-config="apiConfig"
+            @close="isOtomegameOpen = false">
+        </otomegame-app>
+
         <!-- === 弹窗 === -->
         <div class="modal-overlay" v-if="activeModal === 'singleEdit'" @click.self="activeModal = null">
             <div class="modal-content">
@@ -119,6 +146,12 @@
                     <div class="frame-option-container" @click="setFrame('frame-gradient')"><div class="frame-preview frame-gradient"></div><div class="frame-label">梦幻紫</div></div>
                     <div class="frame-option-container" @click="setFrame('frame-stitch')"><div class="frame-preview frame-stitch"></div><div class="frame-label">缝纫风</div></div>
                     <div class="frame-option-container" @click="setFrame('frame-gold')"><div class="frame-preview frame-gold"></div><div class="frame-label">流光金</div></div>
+                    <!-- 预设头像框 -->
+                    <div class="frame-option-container" v-for="(frameUrl, index) in presetFrames" :key="'preset-' + index" @click="setFrame('preset-frame-' + index)">
+                        <div class="frame-preview" :class="'preset-frame-' + index" :style="{ backgroundImage: 'url(' + frameUrl + ')', backgroundSize: 'cover', backgroundPosition: 'center' }"></div>
+                        <div class="frame-label">预设{{ index + 1 }}</div>
+                    </div>
+                    <!-- 自定义头像框 -->
                     <div class="frame-option-container" v-for="(frameUrl, index) in customFrames" :key="'custom-' + index">
                         <div class="frame-preview" :class="'custom-frame-' + index" :style="{ backgroundImage: 'url(' + frameUrl + ')', backgroundSize: 'cover', backgroundPosition: 'center' }" @click="setFrame('custom-frame-' + index)"></div>
                         <div class="frame-label">自定义{{ index + 1 }}</div>
