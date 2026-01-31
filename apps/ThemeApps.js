@@ -43,6 +43,9 @@ export default {
                 <div class="settings-item" @click="$emit('trigger-upload', { type: 'wallpaper-menu' })">
                     <span class="item-icon">🖼️</span><span class="item-label">更换屏幕壁纸</span><span class="item-arrow">＞</span>
                 </div>
+                <div class="settings-item" @click="$emit('trigger-upload', { type: 'wallpaper-qq-universal' })">
+                    <span class="item-icon">💬</span><span class="item-label">QQ聊天室通用壁纸</span><span class="item-arrow">＞</span>
+                </div>
             </div>
             <div style="font-size: 13px; color: #888; margin-bottom: 8px; margin-left: 15px;">图标管理</div>
             <div class="settings-group">
