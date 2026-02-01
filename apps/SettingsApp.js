@@ -22,23 +22,51 @@ export default {
         };
 
         const updateStorage = async () => {
+            let totalUsed = 0;
+            let totalQuota = 0;
+
+            // 1. 计算 LocalStorage 使用量 (字符数 * 2 近似字节)
+            try {
+                for (let i = 0; i < localStorage.length; i++) {
+                    const key = localStorage.key(i);
+                    const val = localStorage.getItem(key);
+                    if (key && val) {
+                        totalUsed += (key.length + val.length) * 2;
+                    }
+                }
+                console.log("LocalStorage used:", totalUsed);
+            } catch (e) {
+                console.warn("LocalStorage access error:", e);
+            }
+
+            // 2. 获取浏览器存储估算 (IndexedDB, Cache 等)
             if (navigator.storage && navigator.storage.estimate) {
                 try {
                     const estimate = await navigator.storage.estimate();
-                    storageInfo.used = estimate.usage || 0;
-                    storageInfo.quota = estimate.quota || 0;
-                    // 避免除以零
-                    if (storageInfo.quota > 0) {
-                        storageInfo.percent = Math.min((storageInfo.used / storageInfo.quota) * 100, 100);
-                    } else {
-                        storageInfo.percent = 0;
-                    }
-                    storageInfo.usedStr = formatSize(storageInfo.used);
-                    storageInfo.quotaStr = formatSize(storageInfo.quota);
+                    totalUsed += (estimate.usage || 0);
+                    totalQuota = estimate.quota || 0;
                 } catch (e) {
                     console.error("Storage estimate failed", e);
                 }
             }
+
+            // 3. 如果无法获取配额或配额为0，设置默认显示值 (例如 1GB)
+            if (totalQuota === 0) {
+                totalQuota = 1024 * 1024 * 1024; // 1GB
+            }
+
+            storageInfo.used = totalUsed;
+            storageInfo.quota = totalQuota;
+            
+            // 计算百分比
+            if (storageInfo.quota > 0) {
+                storageInfo.percent = Math.min((storageInfo.used / storageInfo.quota) * 100, 100);
+            } else {
+                storageInfo.percent = 0;
+            }
+            
+            storageInfo.usedStr = formatSize(storageInfo.used);
+            storageInfo.quotaStr = formatSize(storageInfo.quota);
         };
 
         watch(() => props.isOpen, (newVal) => {
