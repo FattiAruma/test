@@ -40,17 +40,19 @@ export default {
             }
 
             // 2. 获取浏览器存储估算 (IndexedDB, Cache 等)
+            // 由于已升级到 IndexedDB 存储，现在可以使用完整的磁盘配额
             if (navigator.storage && navigator.storage.estimate) {
                 try {
                     const estimate = await navigator.storage.estimate();
-                    totalUsed += (estimate.usage || 0);
+                    // 使用浏览器报告的总使用量 (通常包含 IndexedDB, Cache, Service Worker 等)
+                    if (estimate.usage) totalUsed = estimate.usage;
                     totalQuota = estimate.quota || 0;
                 } catch (e) {
                     console.error("Storage estimate failed", e);
                 }
             }
 
-            // 3. 如果无法获取配额或配额为0，设置默认显示值 (例如 1GB)
+            // 3. 如果无法获取配额或配额为0，设置默认显示值
             if (totalQuota === 0) {
                 totalQuota = 1024 * 1024 * 1024; // 1GB
             }
@@ -197,7 +199,7 @@ export default {
             props.apiConfig.temperature = 1;
         }
 
-        return { apiStatus, saveCurrentApi, loadSavedApi, deleteSavedApi, fetchModels, storageInfo };
+        return { apiStatus, saveCurrentApi, loadSavedApi, deleteSavedApi, fetchModels, storageInfo, updateStorage };
     },
     template: `
     <div class="app-window" :class="{ open: isOpen }">
@@ -262,7 +264,10 @@ export default {
                 </div>
             </div>
 
-            <div style="font-size: 13px; color: #888; margin-bottom: 8px; margin-left: 15px; margin-top: 20px;">存储空间</div>
+            <div style="font-size: 13px; color: #888; margin-bottom: 8px; margin-left: 15px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center;">
+                <span>存储空间</span>
+                <span @click="updateStorage" style="color: var(--accent-color); cursor: pointer; margin-right: 15px;">🔄 刷新</span>
+            </div>
             <div class="settings-group" style="padding: 15px;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
                     <span>已用容量</span>
@@ -271,8 +276,9 @@ export default {
                 <div style="width: 100%; height: 8px; background: #f0f0f0; border-radius: 4px; overflow: hidden;">
                     <div :style="{ width: storageInfo.percent + '%', background: 'var(--accent-color)' }" style="height: 100%; transition: width 0.3s ease;"></div>
                 </div>
-                <div style="font-size: 12px; color: #aaa; margin-top: 8px; text-align: right;">
-                    {{ storageInfo.percent.toFixed(1) }}% 已使用
+                <div style="display: flex; justify-content: space-between; margin-top: 8px;">
+                    <span style="font-size: 12px; color: #aaa;">统计可能有延迟</span>
+                    <span style="font-size: 12px; color: #aaa;">{{ storageInfo.percent.toFixed(1) }}% 已使用</span>
                 </div>
             </div>
         </div>

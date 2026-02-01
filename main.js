@@ -138,12 +138,24 @@ createApp({
 
         const STORAGE_KEY = 'mySpaceData_v6_vue_split';
 
-        // === 3. 读写存档逻辑 ===
+        // === 3. 读写存档逻辑 (升级为 IndexedDB) ===
         
-        const loadData = () => {
-            const saved = localStorage.getItem(STORAGE_KEY);
-            if (saved) {
-                try {
+        const loadData = async () => {
+            try {
+                // 优先从 IndexedDB 读取
+                let saved = await localforage.getItem(STORAGE_KEY);
+                
+                // 迁移逻辑：如果 IndexedDB 为空，尝试从 LocalStorage 读取旧数据
+                if (!saved) {
+                    const localSaved = localStorage.getItem(STORAGE_KEY);
+                    if (localSaved) {
+                        console.log("🔄 检测到旧版存档，正在迁移到大容量存储...");
+                        saved = localSaved;
+                        // 迁移成功后，可以考虑清除旧的 localStorage，这里暂时保留作为备份
+                    }
+                }
+
+                if (saved) {
                     const data = JSON.parse(saved);
                     
                     // 逐项恢复数据
@@ -156,7 +168,7 @@ createApp({
                     
                     if(data.photos) photos.splice(0, photos.length, ...data.photos);
                     
-                    // 智能合并应用数据（防止代码新增App时被旧存档覆盖消失）
+                    // 智能合并应用数据
                     if(data.desktopApps) {
                          for (const key in desktopApps) {
                              if(data.desktopApps[key]) Object.assign(desktopApps[key], data.desktopApps[key]);
@@ -180,48 +192,48 @@ createApp({
                     if(data.savedApis) savedApis.value = data.savedApis;
                     if(data.qqChats) qqData.chatList = data.qqChats;
                     
-                    // ★新增：恢復表情包數據
                     if(data.aiGeneralStickers) qqData.aiGeneralStickers = data.aiGeneralStickers;
                     if(data.userStickers) qqData.userStickers = data.userStickers;
                     
-                    // 恢复自定义头像框
                     if(data.customFrames) customFrames.splice(0, customFrames.length, ...data.customFrames);
                     
-                    // ★新增：恢复QQ通用壁纸
                     if(data.qqUniversalWallpaper) qqData.universalWallpaper = data.qqUniversalWallpaper;
 
-                    console.log("✅ 存檔讀取成功");
-                } catch (e) { console.error("讀取存檔失敗", e); }
-            }
+                    console.log("✅ 存檔讀取成功 (IndexedDB)");
+                }
+            } catch (e) { console.error("讀取存檔失敗", e); }
+            
             // ★★★ 关键步骤：只有读取完（无论成功失败），才允许后续的保存操作 ★★★
             isDataLoaded.value = true;
         };
 
+        let saveTimeout = null;
         const saveData = () => {
             // ★★★ 安全锁检查：如果还没加载完，严禁保存！ ★★★
-            if (!isDataLoaded.value) {
-                // console.log("⏳ 初始化中，跳过自动保存...");
-                return;
-            }
+            if (!isDataLoaded.value) return;
 
-            const dataToSave = {
-                wallpaper: wallpaper.value, avatar: avatar, profile: profile, colors: colors,
-                photos: photos, desktopApps: desktopApps, desktopAppsPage2: desktopAppsPage2, dockApps: dockApps, textWidgets: textWidgets,
-                apiConfig: apiConfig, modelList: modelList.value, savedApis: savedApis.value,
-                qqChats: qqData.chatList,
-                // ★新增：保存表情包數據
-                aiGeneralStickers: qqData.aiGeneralStickers,
-                userStickers: qqData.userStickers,
-                // ★新增：保存QQ通用壁纸
-                qqUniversalWallpaper: qqData.universalWallpaper,
-                // ★新增：保存自定义头像框
-                customFrames: customFrames
-            };
-            try { localStorage.setItem(STORAGE_KEY, JSON.stringify(dataToSave)); } catch (e) {
-                 if (e.name === 'QuotaExceededError') {
-                    alert("⚠️ 空間不足！請確保只使用鏈接上傳。");
+            // 防抖：避免频繁写入 IndexedDB
+            if (saveTimeout) clearTimeout(saveTimeout);
+
+            saveTimeout = setTimeout(async () => {
+                const dataToSave = {
+                    wallpaper: wallpaper.value, avatar: avatar, profile: profile, colors: colors,
+                    photos: photos, desktopApps: desktopApps, desktopAppsPage2: desktopAppsPage2, dockApps: dockApps, textWidgets: textWidgets,
+                    apiConfig: apiConfig, modelList: modelList.value, savedApis: savedApis.value,
+                    qqChats: qqData.chatList,
+                    aiGeneralStickers: qqData.aiGeneralStickers,
+                    userStickers: qqData.userStickers,
+                    qqUniversalWallpaper: qqData.universalWallpaper,
+                    customFrames: customFrames
+                };
+                try { 
+                    await localforage.setItem(STORAGE_KEY, JSON.stringify(dataToSave)); 
+                    // console.log("Saved to IndexedDB");
+                } catch (e) {
+                    console.error("Save failed", e);
+                    alert("⚠️ 保存失败: " + e.message);
                 }
-            }
+            }, 1000); // 1秒延迟保存
         };
 
         // 生成头像框样式
