@@ -56,6 +56,22 @@ export default {
         // 顯示哪一條歷史心聲（0 為最新）
         const currentHeartIndex = ref(0);
 
+        // 新增：世界书列表状态
+        const isWorldbookDropdownOpen = ref(false);
+        const availableWorldbooks = ref([]);
+        const loadWorldbooks = () => {
+            try {
+                const saved = localStorage.getItem('worldbooks');
+                if (saved) {
+                    availableWorldbooks.value = JSON.parse(saved);
+                } else {
+                    availableWorldbooks.value = [];
+                }
+            } catch (e) {
+                availableWorldbooks.value = [];
+            }
+        };
+
         let longPressTimer = null;
 
         // 初始化全局数据结构 (如果不存在)
@@ -129,6 +145,7 @@ export default {
         aiExclusiveStickers: [],
         heartThoughts: [], // ✅ 新增：心聲歷史陣列
         status: 'online', // ✅ 新增：在线状态
+        selectedWorldbooks: [], // 新增：选中的世界书
         // 新增：现实时间感知欄位預設
         timeAware: false,
         timeOverride: '',
@@ -162,6 +179,8 @@ export default {
             if(chat.aiExclusiveStickers === undefined) chat.aiExclusiveStickers = [];
             if(chat.heartThoughts === undefined) chat.heartThoughts = []; // ✅ 初始化心聲欄位
             if(chat.status === undefined) chat.status = 'online'; // ✅ 初始化在线状态
+            if(chat.selectedWorldbooks === undefined) chat.selectedWorldbooks = []; // 初始化世界书选择
+            loadWorldbooks(); // 加载世界书列表
             // 初始化现实时间感知欄位
             if (chat.timeAware === undefined) chat.timeAware = false;
             if (chat.timeOverride === undefined) chat.timeOverride = '';
@@ -332,16 +351,62 @@ export default {
             }
         };
 
-        const handleImageMsgChange = (e) => {
-            const file = e.target.files[0];
-            if (file) {
+        // 新增：图片压缩函数
+        const compressImage = (file) => {
+            return new Promise((resolve, reject) => {
                 const reader = new FileReader();
                 reader.readAsDataURL(file);
                 reader.onload = (ev) => {
-                    const url = ev.target.result;
-                    const chat = getCurrentChat();
-                    pushMessage(chat, 'user', 'image', `[图片] 发送了一张图片`, { imgType: 'local', src: url });
+                    const img = new Image();
+                    img.src = ev.target.result;
+                    img.onload = () => {
+                        // 压缩配置
+                        const maxWidth = 800; // 限制最大宽度
+                        const maxHeight = 800; // 限制最大高度
+                        let width = img.width;
+                        let height = img.height;
+
+                        // 计算缩放比例
+                        if (width > height) {
+                            if (width > maxWidth) {
+                                height = Math.round(height * (maxWidth / width));
+                                width = maxWidth;
+                            }
+                        } else {
+                            if (height > maxHeight) {
+                                width = Math.round(width * (maxHeight / height));
+                                height = maxHeight;
+                            }
+                        }
+
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, width, height);
+
+                        // 导出压缩后的 JPEG，质量 0.7
+                        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
+                        resolve(compressedDataUrl);
+                    };
+                    img.onerror = (err) => reject(err);
                 };
+                reader.onerror = (err) => reject(err);
+            });
+        };
+
+        const handleImageMsgChange = async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                try {
+                    // 使用压缩函数处理图片
+                    const compressedUrl = await compressImage(file);
+                    const chat = getCurrentChat();
+                    pushMessage(chat, 'user', 'image', `[图片] 发送了一张图片`, { imgType: 'local', src: compressedUrl });
+                } catch (err) {
+                    console.error("图片压缩失败", err);
+                    alert("图片处理失败，请重试");
+                }
             }
             e.target.value = '';
         };
@@ -636,6 +701,22 @@ const generateHiddenThought = async (chat, baseUrl) => {
                 if (chat.aiPersona) systemPrompt += `\n你的详细人设：${chat.aiPersona}`;
                 if (chat.userPersona) systemPrompt += `\n对话用户（我）的设定：${chat.userPersona}`;
                 
+                // 注入世界书内容
+                if (chat.selectedWorldbooks && chat.selectedWorldbooks.length > 0) {
+                    try {
+                        const allBooks = JSON.parse(localStorage.getItem('worldbooks') || '[]');
+                        const selectedBooks = allBooks.filter(b => chat.selectedWorldbooks.includes(b.id));
+                        if (selectedBooks.length > 0) {
+                            systemPrompt += `\n\n【世界书/背景设定】：\n`;
+                            selectedBooks.forEach(book => {
+                                systemPrompt += `[${book.title}]: ${book.content}\n`;
+                            });
+                        }
+                    } catch (e) {
+                        console.error("Error loading worldbooks for prompt", e);
+                    }
+                }
+
                 // 若开启现实时间感知，告知模型当前时间或自定义时间
                 const formatDateTimeChinese = (d) => {
                    const yyyy = d.getFullYear();
@@ -696,7 +777,20 @@ const generateHiddenThought = async (chat, baseUrl) => {
                 const validMessages = chat.messages.filter(m => !m.isRetracted && m.type !== 'forwarded');
                 const contextMessages = [
                     { role: "system", content: systemPrompt },
-                    ...validMessages.slice(-limit).map(m => ({ role: m.role, content: m.content }))
+                    ...validMessages.slice(-limit).map(m => {
+                        // 如果是图片消息且有 src (本地图片/压缩图片)
+                        if (m.type === 'image' && m.imgType === 'local' && m.src) {
+                            return {
+                                role: m.role,
+                                content: [
+                                    { type: "text", text: m.content || "发送了一张图片" },
+                                    { type: "image_url", image_url: { url: m.src } }
+                                ]
+                            };
+                        }
+                        // 普通文本消息
+                        return { role: m.role, content: m.content };
+                    })
                 ];
 
                 let baseUrl = props.apiConfig.endpoint.trim().replace(/\/+$/, '');
@@ -1342,6 +1436,9 @@ const deleteHeartEntry = (chat, idx) => {
             isUserStickerPickerOpen, isUserStickerManageMode, userStickerInput, addUserBatchStickers, sendUserSticker,
             // 心聲相關
             isHeartModalOpen, isHeartHistoryOpen, openHeartModal, deleteHeartEntry,
+            // 世界书
+            availableWorldbooks,
+            isWorldbookDropdownOpen,
             // 清空聊天记录
             clearChatHistory
         };
@@ -1451,7 +1548,7 @@ const deleteHeartEntry = (chat, idx) => {
                          <div :style="{
                              width: '20px', height: '20px', borderRadius: '50%',
                              border: selectedMsgIndices.has(index) ? 'none' : '2px solid #ccc',
-                             background: selectedMsgIndices.has(index) ? '#007aff' : 'transparent',
+                             background: selectedMsgIndices.has(index) ? 'var(--accent-color)' : 'transparent',
                              display: 'flex', alignItems: 'center', justifyContent: 'center'
                          }">
                             <span v-if="selectedMsgIndices.has(index)" style="color:white; font-size:12px;">✓</span>
@@ -1568,7 +1665,7 @@ const deleteHeartEntry = (chat, idx) => {
                                  @contextmenu.prevent="showContextMenu($event, index)"
                                  style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: transparent; border: none; overflow: hidden;"
                             >
-                                <img :src="msg.src" style="max-width: 150px; max-height: 150px; display: block; border-radius: 4px;">
+                                <img :src="msg.src" style="max-width: 120px; max-height: 120px; display: block; border-radius: 4px;">
                             </div>
                         </div>
                     </div>
@@ -1731,7 +1828,7 @@ const deleteHeartEntry = (chat, idx) => {
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2"><path d="M23 4v6h-6"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
                     </button>
                     <button @click="triggerAIResponse" :disabled="qqData.isSending" title="推进剧情" style="flex-shrink:0; width:32px; height:32px; background:white; border-radius:50%; border:none; box-shadow:0 1px 3px rgba(0,0,0,0.1); display:flex; justify-content:center; align-items:center;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#007aff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 19 22 12 13 5 13 19"></polygon><polygon points="2 19 11 12 2 5 2 19"></polygon></svg>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 19 22 12 13 5 13 19"></polygon><polygon points="2 19 11 12 2 5 2 19"></polygon></svg>
                     </button>
 
                     <div style="width: 2px; height: 36px; background: rgba(0,0,0,0.12); margin: 0 14px; align-self: center; border-radius:2px; box-shadow: 0 0 0 1px rgba(255,255,255,0.02) inset;"></div>
@@ -1776,7 +1873,7 @@ const deleteHeartEntry = (chat, idx) => {
                     </button>
 
                     <button @click="openLinkModal" title="链接" style="flex-shrink:0; width:32px; height:32px; background:white; border-radius:50%; border:none; box-shadow:0 1px 3px rgba(0,0,0,0.1); display:flex; justify-content:center; align-items:center;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#4a90e2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.72"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.72"></path></svg>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent-color)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.72"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.72-1.72"></path></svg>
                     </button>
                 </div>
                 <div class="chat-input-bar" style="align-items: flex-end; padding-top: 8px; padding-bottom: 8px;">
@@ -1792,7 +1889,7 @@ const deleteHeartEntry = (chat, idx) => {
                 <div style="display:flex; justify-content:space-between; align-items:center;">
                     <div style="font-weight: bold; font-size: 18px;">角色心声</div>
                     <div style="display:flex; gap:8px; align-items:center;">
-                        <button @click.stop="isHeartHistoryOpen = true" style="font-size:13px; border:none; background:none; color:#ff6fa3;">历史心声</button>
+                        <button @click.stop="isHeartHistoryOpen = true" style="font-size:13px; border:none; background:none; color:var(--accent-color);">历史心声</button>
                         <button @click="isHeartModalOpen = false" style="font-size:13px; border:none; background:none; color:#666;">关闭</button>
                     </div>
                 </div>
@@ -1880,8 +1977,8 @@ const deleteHeartEntry = (chat, idx) => {
                     <textarea class="qq-textarea" v-model="linkForm.content" placeholder="必填，粘贴或输入内容" style="height: 120px;"></textarea>
                 </div>
                 <div style="display:flex; gap:10px; margin-top: 15px;">
-                     <button class="modal-btn cancel" @click="isLinkModalOpen = false">取消</button>
-                     <button class="modal-btn" @click="sendLink" style="color: #007aff;">发送</button>
+                     <button class="modal-btn cancel" @click="isLocationModalOpen = false">取消</button>
+                     <button class="modal-btn" @click="sendLocation" style="color: var(--accent-color);">发送</button>
                 </div>
             </div>
         </div>
@@ -1910,29 +2007,58 @@ const deleteHeartEntry = (chat, idx) => {
                 <div class="input-row"><span class="input-label">终点</span><input type="text" class="modal-input" v-model="locationForm.end" placeholder="必填"></div>
                 <div style="display:flex; gap:10px; margin-top: 15px;">
                      <button class="modal-btn cancel" @click="isLocationModalOpen = false">取消</button>
-                     <button class="modal-btn" @click="sendLocation" style="color: #007aff;">发送</button>
+                     <button class="modal-btn" @click="sendLocation" style="color: var(--accent-color);">发送</button>
                 </div>
             </div>
         </div>
 
         <!-- 聊天设置 -->
         <div class="modal-overlay" v-if="isQQSettingsOpen" @click.self="isQQSettingsOpen = false">
-             <div class="modal-content" style="max-height: 85vh; overflow-y: auto;">
-                <div class="modal-title">聊天设置</div>
+             <div class="modal-content" style="max-height: 85vh; display: flex; flex-direction: column; padding: 0; overflow: hidden;">
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 20px 15px; background: white; border-bottom: 1px solid #eee; flex-shrink: 0;">
+                    <div class="modal-title" style="margin-bottom: 0;">聊天设置</div>
+                    <button @click="saveQQSettings" style="border: none; background: none; color: #34c759; font-weight: bold; font-size: 16px;">保存修改</button>
+                </div>
+                <div style="flex: 1; overflow-y: auto; padding: 20px;">
                 <div style="display:flex; justify-content: space-around; width: 100%; margin-bottom: 10px;">
                     <div style="display:flex; flex-direction:column; align-items:center;" @click="triggerAvatarUpload('ai')"><div class="qq-setting-avatar" :style="{ backgroundImage: 'url(' + tempQQSettings.avatar + ')' }"></div><span style="font-size:12px; color:#666;">对方头像</span></div>
                     <div style="display:flex; flex-direction:column; align-items:center;" @click="triggerAvatarUpload('user')"><div class="qq-setting-avatar" :style="{ backgroundImage: 'url(' + tempQQSettings.userAvatar + ')' }"></div><span style="font-size:12px; color:#666;">我的头像</span></div>
                 </div>
-                <div class="input-row"><span class="input-label">本名</span><input type="text" class="modal-input" v-model="tempQQSettings.name"></div>
-                <div class="input-row"><span class="input-label">备注名</span><input type="text" class="modal-input" v-model="tempQQSettings.remark"></div>
-                <div class="input-row"><span class="input-label">记忆条数</span><input type="number" class="modal-input" v-model.number="tempQQSettings.contextLimit"></div>
-                <div class="input-row"><span class="input-label">对方设定</span><textarea class="qq-textarea" v-model="tempQQSettings.aiPersona"></textarea></div>
-                <div class="input-row"><span class="input-label">我的设定</span><textarea class="qq-textarea" v-model="tempQQSettings.userPersona"></textarea></div>
+                <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">本名</span><input type="text" class="modal-input" v-model="tempQQSettings.name" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></div>
+                <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">备注名</span><input type="text" class="modal-input" v-model="tempQQSettings.remark" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></div>
+                <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">记忆条数</span><input type="number" class="modal-input" v-model.number="tempQQSettings.contextLimit" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></div>
+                <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">对方设定</span><textarea class="qq-textarea" v-model="tempQQSettings.aiPersona" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></textarea></div>
+                <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">我的设定</span><textarea class="qq-textarea" v-model="tempQQSettings.userPersona" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></textarea></div>
                 
+                <!-- 世界书选择 -->
+                <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
+                    <div style="font-weight:bold; font-size:15px; margin-bottom:10px;">世界书</div>
+                    
+                    <!-- 下拉触发条 -->
+                    <div @click="isWorldbookDropdownOpen = !isWorldbookDropdownOpen" 
+                         style="background: #fff; border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow); padding: 10px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                        <span style="font-size: 14px; color: #333;">
+                            {{ tempQQSettings.selectedWorldbooks && tempQQSettings.selectedWorldbooks.length > 0 
+                               ? '已选择 ' + tempQQSettings.selectedWorldbooks.length + ' 本世界书' 
+                               : ' 点击选择 ' }}
+                        </span>
+                        <span style="font-size: 12px; color: #999; transition: transform 0.3s;" :style="{ transform: isWorldbookDropdownOpen ? 'rotate(180deg)' : 'rotate(0deg)' }">▼</span>
+                    </div>
+
+                    <!-- 下拉列表 -->
+                    <div v-if="isWorldbookDropdownOpen" style="background: #f9f9f9; border: 1px solid #eee; border-top: none; border-radius: 0 0 8px 8px; padding: 10px; max-height: 150px; overflow-y: auto; margin-top: -2px; position: relative; z-index: 10;">
+                        <div v-if="availableWorldbooks.length === 0" style="color: #999; font-size: 12px; text-align: center; padding: 10px;">暂无世界书，请在世界书App中添加</div>
+                        <div v-else v-for="book in availableWorldbooks" :key="book.id" style="display: flex; align-items: center; margin-bottom: 8px; padding: 5px; border-radius: 4px;" @click.stop>
+                            <input type="checkbox" :id="'wb-'+book.id" :value="book.id" v-model="tempQQSettings.selectedWorldbooks" style="margin-right: 8px;">
+                            <label :for="'wb-'+book.id" style="font-size: 14px; color: #333; flex: 1; cursor: pointer;">{{ book.title }}</label>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- AI 表情包入口 -->
                 <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
-                        <span style="font-weight:bold; font-size:14px;">现实时间感知</span>
+                        <span style="font-weight:bold; font-size:15px;">现实时间感知</span>
                         <div @click="tempQQSettings.timeAware = !tempQQSettings.timeAware"
                              :style="{ 
                                  width: '40px', height: '22px', borderRadius: '11px', 
@@ -1948,14 +2074,14 @@ const deleteHeartEntry = (chat, idx) => {
                     </div>
                     <div v-if="tempQQSettings.timeAware" style="margin-bottom:8px;">
                         <div style="font-size:12px; color:#666; margin-bottom:6px;">可自定义时间（留空使用当前本地时间）</div>
-                        <input type="datetime-local" v-model="tempQQSettings.timeOverride" style="width:100%; padding:8px; border:1px solid #ddd; border-radius:6px;" />
+                        <input type="datetime-local" v-model="tempQQSettings.timeOverride" style="width:100%; padding:8px; border:1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow); border-radius:6px;" />
                     </div>
                 </div>
                 <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <span style="font-weight:bold; font-size:14px;">表情包库配置</span>
+                        <span style="font-weight:bold; font-size:15px;">表情包库配置</span>
                     </div>
-                    <button class="modal-btn" style="width:100%; font-size:13px; background:#f0f0f0; color:#333; border:1px solid #ddd;" 
+                    <button class="modal-btn" style="width:100%; font-size:13px; background:#f0f0f0; color:#333; border:1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);" 
                             @click="isStickerSettingsOpen = true">
                         管理 AI 表情包 ({{ (tempQQSettings.aiExclusiveStickers ? tempQQSettings.aiExclusiveStickers.length : 0) }} 专属 / {{ (qqData.aiGeneralStickers ? qqData.aiGeneralStickers.length : 0) }} 通用)
                     </button>
@@ -1964,7 +2090,7 @@ const deleteHeartEntry = (chat, idx) => {
                 <!-- 长期记忆总结 -->
                 <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                        <span style="font-weight:bold; font-size:14px;">长期记忆总结</span>
+                        <span style="font-weight:bold; font-size:15px;">长期记忆总结</span>
                         <div @click="tempQQSettings.enableSummary = !tempQQSettings.enableSummary" 
                              :style="{ 
                                  width: '40px', height: '22px', borderRadius: '11px', 
@@ -1978,7 +2104,7 @@ const deleteHeartEntry = (chat, idx) => {
                              }"></div>
                         </div>
                     </div>
-                    <div v-if="tempQQSettings.enableSummary" style="background: #f5f5f7; padding: 10px; border-radius: 8px;">
+                    <div v-if="tempQQSettings.enableSummary" style="background: #f5f5f7; padding: 10px; border-radius: 8px; border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);">
                         <div class="input-row" style="margin-bottom:8px;">
                             <span class="input-label" style="width:60px;">模式</span>
                             <div style="flex:1; display:flex; gap:10px;">
@@ -1995,7 +2121,7 @@ const deleteHeartEntry = (chat, idx) => {
                             <textarea class="qq-textarea" v-model="tempQQSettings.summaryPrompt" style="height: 60px;"></textarea>
                         </div>
                         <div style="display:flex; gap:10px; margin-top:10px;">
-                            <button class="modal-btn" style="width:100%; font-size:12px; background:#fff; color:#007aff; border:1px solid #007aff;" @click="isSummaryEditOpen = true">
+                            <button class="modal-btn" style="width:100%; font-size:12px; background:#fff; color:var(--accent-color); border:1px solid var(--accent-color);" @click="isSummaryEditOpen = true">
                                 查看/管理记忆 ({{ tempQQSettings.memoryList ? tempQQSettings.memoryList.length : 0 }})
                             </button>
                             <button class="modal-btn" style="width:100%; font-size:12px; background:#fff; color:#ff9500; border:1px solid #ff9500;" @click="handleManualSummary">
@@ -2007,8 +2133,8 @@ const deleteHeartEntry = (chat, idx) => {
 
                 <!-- 字体大小调整 -->
                 <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
-                    <div style="font-weight:bold; font-size:14px; margin-bottom:10px;">字体大小调整</div>
-                    <div style="background: #f5f5f7; padding: 10px; border-radius: 8px;">
+                    <div style="font-weight:bold; font-size:15px; margin-bottom:10px;">字体大小调整</div>
+                    <div style="background: #f5f5f7; padding: 10px; border-radius: 8px; border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);">
                         <div style="display:flex; align-items:center; gap:10px; margin-bottom:10px;">
                             <span style="font-size:12px; color:#666; min-width:60px;">字体大小</span>
                             <input 
@@ -2031,8 +2157,8 @@ const deleteHeartEntry = (chat, idx) => {
 
                 <!-- CSS自定义 -->
                 <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
-                    <div style="font-weight:bold; font-size:14px; margin-bottom:10px;">CSS 自定义气泡样式</div>
-                    <div style="background: #f5f5f7; padding: 10px; border-radius: 8px;">
+                    <div style="font-weight:bold; font-size:15px; margin-bottom:10px;">CSS 自定义气泡样式</div>
+                    <div style="background: #f5f5f7; padding: 10px; border-radius: 8px; border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);">
                         <textarea 
                             v-model="tempQQSettings.customCSS" 
                             class="qq-textarea" 
@@ -2062,7 +2188,7 @@ const deleteHeartEntry = (chat, idx) => {
                             <div style="display: flex; margin-bottom: 0; align-items: flex-start; flex-direction: row-reverse;">
                                 <div style="width: 36px; height: 36px; border-radius: 50%; background: #ddd; margin-left: 10px; flex-shrink: 0;"></div>
                                 <div class="message-bubble user">
-                                    <div class="content" :style="!tempQQSettings.customCSS ? 'background: #0099ff; color: #333; padding: 10px 12px; border-radius: 8px; max-width: 200px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);' : 'padding: 10px 12px; border-radius: 8px; max-width: 200px;'">
+                                    <div class="content" :style="!tempQQSettings.customCSS ? 'background: var(--accent-color); color: #333; padding: 10px 12px; border-radius: 8px; max-width: 200px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);' : 'padding: 10px 12px; border-radius: 8px; max-width: 200px;'">
                                         这是用户的消息气泡
                                     </div>
                                 </div>
@@ -2073,8 +2199,8 @@ const deleteHeartEntry = (chat, idx) => {
 
                 <!-- 聊天室背景 -->
                 <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
-                    <div style="font-weight:bold; font-size:14px; margin-bottom:10px;">聊天室背景</div>
-                    <div style="background: #f5f5f7; padding: 10px; border-radius: 8px;">
+                    <div style="font-weight:bold; font-size:15px; margin-bottom:10px;">聊天室背景</div>
+                    <div style="background: #f5f5f7; padding: 10px; border-radius: 8px; border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);">
                         <div style="font-size: 12px; color: #666; margin-bottom: 5px;">背景图片链接</div>
                         <input 
                             type="text" 
@@ -2089,11 +2215,11 @@ const deleteHeartEntry = (chat, idx) => {
                 </div>
 
                 <div style="margin-top: 15px;">
-                    <button class="modal-btn" style="color: #34c759; width: 100%; margin-bottom: 10px;" @click="saveQQSettings">保存修改</button>
                     <div style="display:flex; gap:10px;">
                         <button class="modal-btn" style="color: #ff9500; flex:1;" @click="clearChatHistory">清空记录</button>
                         <button class="modal-btn" style="color: #ff3b30; flex:1;" @click="deleteCurrentChat">删除好友</button>
                     </div>
+                </div>
                 </div>
              </div>
         </div>

@@ -1,4 +1,9 @@
 /* style.css */
+:root {
+    --accent-color: #007aff;
+    --accent-color-dark: #0056b3;
+}
+
 /* 核心修复区域 */
 /* style.css - 头部修改 */
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif; }
@@ -126,7 +131,7 @@ body {
 .text-widget:active { transform: scale(0.97); }
 .text-title { font-size: 14px; font-weight: bold; margin-bottom: 3px; pointer-events: none; }
 .text-desc { font-size: 11px; opacity: 0.8; pointer-events: none; }
-.app-item { grid-column: span 1; grid-row: span 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; cursor: pointer; transition: transform 0.1s; width: 100%; height: 100%; }
+.app-item { grid-column: span 1; grid-row: span 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; cursor: pointer; transition: transform 0.1s; width: 100%; height: 100%; aspect-ratio: 1 / 1; }
 .app-item:active { transform: scale(0.9); }
 .app-icon { width: 54px; height: 54px; background: rgba(255,255,255,0.85); border-radius: 15px; display: flex; justify-content: center; align-items: center; font-size: 26px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); color: #5D4037; background-size: cover; background-position: center; background-repeat: no-repeat; }
 .app-name { font-size: 10px; font-weight: 500; text-align: center; }
@@ -182,8 +187,8 @@ body {
 .app-window.open { transform: translateY(0); }
 .app-header { height: 50px; display: flex; justify-content: center; align-items: center; background: rgba(255,255,255,0.8); backdrop-filter: blur(10px); border-bottom: 0.5px solid rgba(0,0,0,0.1); position: relative; flex-shrink: 0; margin-top: env(safe-area-inset-top); }
 .app-header-title { font-weight: 600; font-size: 17px; }
-.app-header-close { position: absolute; right: 15px; font-size: 16px; color: #007aff; font-weight: 600; cursor: pointer; }
-.app-header-left { position: absolute; left: 15px; font-size: 16px; color: #007aff; cursor: pointer; display: flex; align-items: center; }
+.app-header-close { position: absolute; right: 15px; font-size: 16px; color: var(--accent-color); font-weight: 600; cursor: pointer; }
+.app-header-left { position: absolute; left: 15px; font-size: 16px; color: var(--accent-color); cursor: pointer; display: flex; align-items: center; }
 .app-content { flex: 1; overflow-y: auto; padding: 20px; }
 
 /* 设置项通用 */
@@ -196,19 +201,19 @@ body {
 .saved-api-container { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; min-height: 20px; }
 .saved-api-chip { background: #f0f2f5; color: #555; padding: 6px 12px; border-radius: 20px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 6px; cursor: pointer; transition: all 0.2s ease; border: 1px solid transparent; }
 .saved-api-chip:active { transform: scale(0.96); background: #e1e4e8; }
-.saved-api-chip:hover { background: #fff; border-color: #007aff; color: #007aff; box-shadow: 0 2px 8px rgba(0,122,255,0.15); }
+.saved-api-chip:hover { background: #fff; border-color: var(--accent-color); color: var(--accent-color); box-shadow: 0 2px 8px rgba(0,122,255,0.15); }
 .saved-api-chip .delete-btn { width: 16px; height: 16px; border-radius: 50%; background: #e0e0e0; color: #fff; font-size: 12px; display: flex; justify-content: center; align-items: center; margin-left: 2px; }
 .saved-api-chip:hover .delete-btn { background: #ff3b30; }
 .input-row { display: flex; flex-direction: column; width: 100%; gap: 6px; margin-bottom: 15px; }
 .input-label { font-size: 13px; font-weight: 600; color: #333; margin-left: 4px; }
 .settings-input { border: 1px solid #e0e0e0; background: #f9f9f9; padding: 12px; border-radius: 10px; font-size: 15px; outline: none; transition: all 0.2s; width: 100%; }
-.settings-input:focus { border-color: #007aff; background: #fff; box-shadow: 0 0 0 3px rgba(0,122,255,0.1); }
+.settings-input:focus { border-color: var(--accent-color); background: #fff; box-shadow: 0 0 0 3px rgba(0,122,255,0.1); }
 .settings-input.error { border-color: #ff3b30; background: #fff5f5; }
 .btn-group { display: flex; gap: 12px; margin-top: 10px; }
 .btn-base { border: none; border-radius: 10px; padding: 14px; font-weight: 600; font-size: 15px; cursor: pointer; transition: transform 0.1s, opacity 0.2s; display: flex; justify-content: center; align-items: center; gap: 6px; }
 .btn-base:active { transform: scale(0.98); opacity: 0.8; }
 .btn-save { background: #eef1f6; color: #444; flex: 1; }
-.btn-verify { background: linear-gradient(135deg, #007aff, #0056b3); color: #fff; flex: 2; box-shadow: 0 4px 10px rgba(0,122,255,0.25); }
+.btn-verify { background: linear-gradient(135deg, var(--accent-color), var(--accent-color-dark)); color: #fff; flex: 2; box-shadow: none; }
 .btn-verify:disabled { background: #ccc; box-shadow: none; cursor: not-allowed; }
 .status-msg { font-size: 13px; margin-top: 12px; text-align: center; font-weight: 500; min-height: 20px; }
 .status-msg.success { color: #34c759; }
@@ -218,13 +223,13 @@ body {
 .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.3); z-index: 2000; display: flex; justify-content: center; align-items: flex-end; padding-bottom: 30px; }
 .modal-content { width: 90%; max-width: 400px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(20px); border-radius: 20px; padding: 20px; animation: slideUpModal 0.3s ease-out; display: flex; flex-direction: column; gap: 10px; max-height: 80vh; overflow-y: auto; }
 @keyframes slideUpModal { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-.modal-btn { background: #fff; border: none; padding: 15px; border-radius: 12px; font-size: 16px; color: #007aff; font-weight: 500; box-shadow: 0 2px 10px rgba(0,0,0,0.05); cursor: pointer; text-align: center; width: 100%; }
+.modal-btn { background: #fff; border: none; padding: 15px; border-radius: 12px; font-size: 16px; color: var(--accent-color); font-weight: 500; box-shadow: 0 2px 10px rgba(0,0,0,0.05); cursor: pointer; text-align: center; width: 100%; }
 .modal-btn.cancel { color: #ff3b30; font-weight: bold; margin-top: 5px; }
 .modal-input { width: 100%; padding: 12px; border: 1px solid #ebedf0; border-radius: 10px; font-size: 14px; background: #f9f9f9; outline: none; }
 .text-input-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
 .align-control { display: flex; justify-content: center; gap: 10px; margin-bottom: 10px; }
 .align-btn { flex: 1; padding: 10px; border: 1px solid #ebedf0; border-radius: 8px; background: #fff; cursor: pointer; color: #555; font-size: 16px; display: flex; justify-content: center; align-items: center; }
-.align-btn.active { background: #007aff; color: #fff; border-color: #007aff; }
+.align-btn.active { background: var(--accent-color); color: #fff; border-color: var(--accent-color); }
 .color-preview-dot { width: 24px; height: 24px; border-radius: 50%; border: 1px solid #ddd; margin-right: 12px; background-color: #5D4037; box-shadow: inset 0 0 2px rgba(0,0,0,0.1); flex-shrink: 0; }
 .item-icon { margin-right: 12px; font-size: 20px; width: 24px; text-align: center; }
 .item-label { font-size: 16px; color: #000; flex: 1; }
@@ -263,12 +268,12 @@ body {
 .chat-message.ai { align-self: flex-start; }
 .chat-bubble { padding: 10px 14px; border-radius: 18px; font-size: 16px; line-height: 1.4; word-break: break-word; position: relative; max-width: 100%; }
 .chat-message.ai .chat-bubble { background: #fff; color: #000; border-top-left-radius: 4px; }
-.chat-message.me .chat-bubble { background: #0099FF; color: #fff; border-top-right-radius: 4px; }
+.chat-message.me .chat-bubble { background: var(--accent-color); color: #fff; border-top-right-radius: 4px; }
 .chat-avatar-small { width: 36px; height: 36px; border-radius: 50%; background-color: #ccc; background-size: cover; background-position: center; flex-shrink: 0; }
 
 .chat-input-bar { background: #f9f9f9; border-top: 0.5px solid #dcdcdc; padding: 8px 10px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
 .chat-input { flex: 1; min-height: 36px; max-height: 100px; padding: 8px 12px; border-radius: 18px; border: none; background: #fff; font-size: 16px; outline: none; resize: none; }
-.chat-send-btn { color: #0099FF; font-weight: 600; font-size: 16px; padding: 5px 10px; cursor: pointer; border: none; background: transparent; }
+.chat-send-btn { color: var(--accent-color); font-weight: 600; font-size: 16px; padding: 5px 10px; cursor: pointer; border: none; background: transparent; }
 .chat-send-btn:disabled { opacity: 0.3; }
 
 /* QQ设置弹窗特定 */
@@ -549,7 +554,7 @@ body {
 }
 
 .modal-input:focus { 
-    border-color: #007aff; 
+    border-color: var(--accent-color); 
     background: #fff; 
     box-shadow: 0 0 0 3px rgba(0,122,255,0.1);
 }
@@ -574,7 +579,7 @@ body {
 }
 
 .modal-textarea:focus { 
-    border-color: #007aff; 
+    border-color: var(--accent-color); 
     background: #fff; 
     box-shadow: 0 0 0 3px rgba(0,122,255,0.1);
 }
@@ -605,7 +610,7 @@ body {
 }
 
 .modal-btn.confirm { 
-    background: linear-gradient(135deg, #007aff, #0056b3); 
+    background: linear-gradient(135deg, var(--accent-color), var(--accent-color-dark)); 
     color: white;
     flex: 1;
     box-shadow: 0 4px 10px rgba(0,122,255,0.25);
@@ -930,7 +935,7 @@ body {
 }
 
 .save-btn { 
-    background: #007aff; 
+    background: var(--accent-color); 
     color: white; 
     border: none; 
     padding: 8px 16px; 
@@ -993,7 +998,7 @@ body {
 }
 
 .form-input-small:focus { 
-    border-color: #007aff; 
+    border-color: var(--accent-color); 
     background: #fff;
 }
 
@@ -1011,7 +1016,7 @@ body {
 }
 
 .form-textarea:focus { 
-    border-color: #007aff; 
+    border-color: var(--accent-color); 
     background: #fff;
 }
 

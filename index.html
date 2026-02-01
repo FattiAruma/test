@@ -55,10 +55,45 @@
                 <div class="screen">
                     <div class="layout-container">
                         <!-- 第二页内容 -->
-                        <div class="glass-box text-widget" style="grid-column: span 4; text-align: center; align-self: start; padding: 20px;">
-                            <div class="text-title" style="font-size: 18px;">第二页</div>
-                            <div class="text-desc" style="font-size: 14px; margin-top: 8px;">这里是第二页，可以放置更多应用和小组件。</div>
+                        <div class="glass-box" style="grid-column: 1 / span 2; grid-row: 1 / span 2;"></div>
+
+                        <div class="app-item" style="grid-column: 3; grid-row: 1;" @click="handleAppClick('taobao')">
+                            <div class="app-icon" :style="[desktopAppsPage2.taobao.img ? { backgroundImage: 'url(' + desktopAppsPage2.taobao.img + ')' } : {}, { color: colors.app }]"><span v-if="!desktopAppsPage2.taobao.img">{{ desktopAppsPage2.taobao.icon }}</span></div>
+                            <span class="app-name" :style="{ color: colors.app }">{{ desktopAppsPage2.taobao.name }}</span>
                         </div>
+                        <div class="app-item" style="grid-column: 4; grid-row: 1;" @click="handleAppClick('bilibili')">
+                            <div class="app-icon" :style="[desktopAppsPage2.bilibili.img ? { backgroundImage: 'url(' + desktopAppsPage2.bilibili.img + ')' } : {}, { color: colors.app }]"><span v-if="!desktopAppsPage2.bilibili.img">{{ desktopAppsPage2.bilibili.icon }}</span></div>
+                            <span class="app-name" :style="{ color: colors.app }">{{ desktopAppsPage2.bilibili.name }}</span>
+                        </div>
+                        <div class="app-item" style="grid-column: 3; grid-row: 2;" @click="handleAppClick('ins')">
+                            <div class="app-icon" :style="[desktopAppsPage2.ins.img ? { backgroundImage: 'url(' + desktopAppsPage2.ins.img + ')' } : {}, { color: colors.app }]"><span v-if="!desktopAppsPage2.ins.img">{{ desktopAppsPage2.ins.icon }}</span></div>
+                            <span class="app-name" :style="{ color: colors.app }">{{ desktopAppsPage2.ins.name }}</span>
+                        </div>
+                        <div class="app-item" style="grid-column: 4; grid-row: 2;" @click="handleAppClick('musicgame')">
+                            <div class="app-icon" :style="[desktopAppsPage2.musicgame.img ? { backgroundImage: 'url(' + desktopAppsPage2.musicgame.img + ')' } : {}, { color: colors.app }]"><span v-if="!desktopAppsPage2.musicgame.img">{{ desktopAppsPage2.musicgame.icon }}</span></div>
+                            <span class="app-name" :style="{ color: colors.app }">{{ desktopAppsPage2.musicgame.name }}</span>
+                        </div>
+
+                        <div class="glass-box" style="grid-column: 1 / span 4; grid-row: 3 / span 2; min-height: 167px; margin: 12px 0;"></div>
+
+                        <div class="app-item" style="grid-column: 1; grid-row: 5;" @click="handleAppClick('mailbox')">
+                            <div class="app-icon" :style="[desktopAppsPage2.mailbox.img ? { backgroundImage: 'url(' + desktopAppsPage2.mailbox.img + ')' } : {}, { color: colors.app }]"><span v-if="!desktopAppsPage2.mailbox.img">{{ desktopAppsPage2.mailbox.icon }}</span></div>
+                            <span class="app-name" :style="{ color: colors.app }">{{ desktopAppsPage2.mailbox.name }}</span>
+                        </div>
+                        <div class="app-item" style="grid-column: 2; grid-row: 5;" @click="handleAppClick('discord')">
+                            <div class="app-icon" :style="[desktopAppsPage2.discord.img ? { backgroundImage: 'url(' + desktopAppsPage2.discord.img + ')' } : {}, { color: colors.app }]"><span v-if="!desktopAppsPage2.discord.img">{{ desktopAppsPage2.discord.icon }}</span></div>
+                            <span class="app-name" :style="{ color: colors.app }">{{ desktopAppsPage2.discord.name }}</span>
+                        </div>
+                        <div class="app-item" style="grid-column: 1; grid-row: 6;" @click="handleAppClick('live')">
+                            <div class="app-icon" :style="[desktopAppsPage2.live.img ? { backgroundImage: 'url(' + desktopAppsPage2.live.img + ')' } : {}, { color: colors.app }]"><span v-if="!desktopAppsPage2.live.img">{{ desktopAppsPage2.live.icon }}</span></div>
+                            <span class="app-name" :style="{ color: colors.app }">{{ desktopAppsPage2.live.name }}</span>
+                        </div>
+                        <div class="app-item" style="grid-column: 2; grid-row: 6;" @click="handleAppClick('novel')">
+                            <div class="app-icon" :style="[desktopAppsPage2.novel.img ? { backgroundImage: 'url(' + desktopAppsPage2.novel.img + ')' } : {}, { color: colors.app }]"><span v-if="!desktopAppsPage2.novel.img">{{ desktopAppsPage2.novel.icon }}</span></div>
+                            <span class="app-name" :style="{ color: colors.app }">{{ desktopAppsPage2.novel.name }}</span>
+                        </div>
+
+                        <div class="glass-box" style="grid-column: 3 / span 2; grid-row: 5 / span 2;"></div>
                     </div>
                 </div>
             </div>
@@ -115,6 +150,11 @@
             :api-config="apiConfig"
             @close="isOtomegameOpen = false">
         </otomegame-app>
+
+        <worldbook-app 
+            :is-open="isWorldbookOpen"
+            @close="isWorldbookOpen = false">
+        </worldbook-app>
 
         <!-- === 弹窗 === -->
         <div class="modal-overlay" v-if="activeModal === 'singleEdit'" @click.self="activeModal = null">

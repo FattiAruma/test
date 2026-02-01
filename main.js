@@ -5,16 +5,17 @@ import SettingsApp from './apps/SettingsApp.js';
 import ThemeApps from './apps/ThemeApps.js';
 import TypefaceApp from './apps/TypefaceApp.js';
 import OtomegameApp from './apps/OtomegameApp.js';
+import WorldbookApp from './apps/WorldbookApp.js';
 
 createApp({
-    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp, OtomegameApp },
+    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp, OtomegameApp, WorldbookApp },
     setup() {
         // === 1. 定义默认数据 ===
         const defaultData = {
             wallpaper: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=1000&auto=format&fit=crop',
             avatar: { img: '', frame: 'frame-pink' },
             profile: { name: '小手机 <3', bio1: 'Welcome to my world', bio2: '点击下方图标开始聊天' },
-            colors: { app: '#5D4037', widget: '#5D4037', header: '#5D4037' },
+            colors: { app: '#5D4037', widget: '#5D4037', header: '#5D4037', accent: '#007aff' },
             photos: [
                 'https://images.unsplash.com/photo-1516961642265-531546e84af2?q=80&w=400&auto=format&fit=crop',
                 'https://images.unsplash.com/photo-1529333166437-7750a6dd5a70?q=80&w=400&auto=format&fit=crop'
@@ -24,6 +25,16 @@ createApp({
                 world: { icon: '📕', name: '世界书', img: '' },
                 phone: { icon: '📱', name: '查手机', img: '' },
                 otomegame: { icon: '🎮', name: '恋爱轮盘', img: '' },
+            },
+            desktopAppsPage2: {
+                taobao: { icon: '淘', name: '桃Bao', img: '' },
+                bilibili: { icon: '📺', name: '哔哩哔哩', img: '' },
+                ins: { icon: '📷', name: 'ins', img: '' },
+                musicgame: { icon: '🎵', name: '音游', img: '' },
+                mailbox: { icon: '🤫', name: '匿名箱', img: '' },
+                discord: { icon: '💬', name: 'Discord', img: '' },
+                live: { icon: '🔴', name: '直播间', img: '' },
+                novel: { icon: '📖', name: '小说', img: '' },
             },
             dockApps: {
                 settings: { icon: '⚙️', name: '设置', img: '' },
@@ -48,6 +59,7 @@ createApp({
         const colors = reactive({ ...defaultData.colors });
         const photos = reactive([...defaultData.photos]);
         const desktopApps = reactive(JSON.parse(JSON.stringify(defaultData.desktopApps)));
+        const desktopAppsPage2 = reactive(JSON.parse(JSON.stringify(defaultData.desktopAppsPage2)));
         const dockApps = reactive(JSON.parse(JSON.stringify(defaultData.dockApps)));
         const textWidgets = reactive(JSON.parse(JSON.stringify(defaultData.textWidgets)));
         const customFrames = reactive([]);
@@ -77,6 +89,7 @@ createApp({
         const isBeautifyOpen = ref(false);
         const isFontOpen = ref(false);
         const isOtomegameOpen = ref(false);
+        const isWorldbookOpen = ref(false);
 
         // 页面滑动
         const currentPage = ref(0);
@@ -87,10 +100,14 @@ createApp({
         const screenWidth = ref(window.innerWidth);
 
         const screensContainerStyle = computed(() => {
-            const translateX = -currentPage.value * screenWidth.value + dragX.value;
+            // 使用百分比来处理页面切换，避免 resize 时的抖动
+            // screens-container 宽度是 200%，所以切换一页是 50%
+            const percentage = -currentPage.value * 50;
+            const pixelOffset = dragX.value;
+            
             const transition = isDragging.value ? 'none' : 'transform 0.4s cubic-bezier(0.25, 0.8, 0.25, 1)';
             return {
-                transform: `translateX(${translateX}px)`,
+                transform: `translateX(calc(${percentage}% + ${pixelOffset}px))`,
                 transition: transition,
             };
         });
@@ -108,10 +125,15 @@ createApp({
         // ★★★ 安全锁：默认锁定，直到读取存档完成后才解锁 ★★★
         const isDataLoaded = ref(false);
 
-        const allApps = computed(() => ({ ...desktopApps, ...dockApps }));
+        const allApps = computed(() => ({ ...desktopApps, ...desktopAppsPage2, ...dockApps }));
+
+        const wallpapers = reactive({
+            menu: computed(() => wallpaper.value),
+            qqUniversal: computed(() => qqData.universalWallpaper)
+        });
         
         const themeState = reactive({
-            colors, allApps, avatar, presetFrames, customFrames
+            colors, allApps, avatar, presetFrames, customFrames, wallpapers
         });
 
         const STORAGE_KEY = 'mySpaceData_v6_vue_split';
@@ -129,6 +151,9 @@ createApp({
                     if(data.avatar) Object.assign(avatar, data.avatar);
                     if(data.profile) Object.assign(profile, data.profile);
                     if(data.colors) Object.assign(colors, data.colors);
+                    // 确保 accent 存在 (兼容旧存档)
+                    if (!colors.accent) colors.accent = '#007aff';
+                    
                     if(data.photos) photos.splice(0, photos.length, ...data.photos);
                     
                     // 智能合并应用数据（防止代码新增App时被旧存档覆盖消失）
@@ -141,6 +166,12 @@ createApp({
                         for (const key in dockApps) {
                             if(data.dockApps[key]) Object.assign(dockApps[key], data.dockApps[key]);
                         }
+                    }
+
+                    if(data.desktopAppsPage2) {
+                         for (const key in desktopAppsPage2) {
+                             if(data.desktopAppsPage2[key]) Object.assign(desktopAppsPage2[key], data.desktopAppsPage2[key]);
+                         }
                     }
 
                     if(data.textWidgets) textWidgets.splice(0, textWidgets.length, ...data.textWidgets);
@@ -156,6 +187,9 @@ createApp({
                     // 恢复自定义头像框
                     if(data.customFrames) customFrames.splice(0, customFrames.length, ...data.customFrames);
                     
+                    // ★新增：恢复QQ通用壁纸
+                    if(data.qqUniversalWallpaper) qqData.universalWallpaper = data.qqUniversalWallpaper;
+
                     console.log("✅ 存檔讀取成功");
                 } catch (e) { console.error("讀取存檔失敗", e); }
             }
@@ -172,12 +206,14 @@ createApp({
 
             const dataToSave = {
                 wallpaper: wallpaper.value, avatar: avatar, profile: profile, colors: colors,
-                photos: photos, desktopApps: desktopApps, dockApps: dockApps, textWidgets: textWidgets,
+                photos: photos, desktopApps: desktopApps, desktopAppsPage2: desktopAppsPage2, dockApps: dockApps, textWidgets: textWidgets,
                 apiConfig: apiConfig, modelList: modelList.value, savedApis: savedApis.value,
                 qqChats: qqData.chatList,
                 // ★新增：保存表情包數據
                 aiGeneralStickers: qqData.aiGeneralStickers,
                 userStickers: qqData.userStickers,
+                // ★新增：保存QQ通用壁纸
+                qqUniversalWallpaper: qqData.universalWallpaper,
                 // ★新增：保存自定义头像框
                 customFrames: customFrames
             };
@@ -251,14 +287,52 @@ createApp({
             generateFrameStyles();
         }, { deep: true });
 
+        // 更新主题色 CSS 变量
+        const updateAccentColor = () => {
+            const root = document.documentElement;
+            const color = colors.accent || '#007aff';
+            root.style.setProperty('--accent-color', color);
+            
+            // 简单的变暗处理用于渐变
+            // 这里简单处理，如果需要更精确的颜色操作可以使用库，或者直接用纯色
+            // 为了保持简单，我们这里直接设置一个稍微变暗的颜色变量，或者直接让 CSS 使用 color-mix
+            // 但为了兼容性，我们可以在这里计算一个简单的 hex 变暗
+            // 简单起见，我们让 CSS 使用 color-mix 或者直接用纯色代替渐变，或者只改变主色
+            // 这里我们尝试计算一个 darken 颜色
+            try {
+                let r = parseInt(color.substring(1, 3), 16);
+                let g = parseInt(color.substring(3, 5), 16);
+                let b = parseInt(color.substring(5, 7), 16);
+                
+                r = Math.floor(r * 0.85);
+                g = Math.floor(g * 0.85);
+                b = Math.floor(b * 0.85);
+                
+                const darkColor = `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+                root.style.setProperty('--accent-color-dark', darkColor);
+                
+                const shadowColor = `rgba(${r}, ${g}, ${b}, 0.3)`;
+                root.style.setProperty('--accent-color-shadow', shadowColor);
+            } catch (e) {
+                root.style.setProperty('--accent-color-dark', color);
+                root.style.setProperty('--accent-color-shadow', color); // Fallback
+            }
+        };
+
         // 监听变化自动保存
-        watch([wallpaper, avatar, profile, colors, photos, desktopApps, dockApps, textWidgets, customFrames, apiConfig, modelList, savedApis, () => qqData.chatList, () => qqData.aiGeneralStickers, () => qqData.userStickers], () => {
+        watch([wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets, customFrames, apiConfig, modelList, savedApis, () => qqData.chatList, () => qqData.aiGeneralStickers, () => qqData.userStickers, () => qqData.universalWallpaper], () => {
             saveData();
         }, { deep: true });
+        
+        // 监听颜色变化更新 CSS
+        watch(() => colors.accent, () => {
+            updateAccentColor();
+        });
 
         // 挂载时读取并生成样式
         onMounted(() => {
             loadData();
+            updateAccentColor();
             setTimeout(() => generateFrameStyles(), 100);
             
             // 添加滑动事件监听
@@ -323,6 +397,7 @@ createApp({
             else if (key === 'qq') isQQOpen.value = true;
             else if (key === 'font') isFontOpen.value = true;
             else if (key === 'otomegame') isOtomegameOpen.value = true;
+            else if (key === 'world') isWorldbookOpen.value = true;
         };
 
         // === 4. 强制链接上传逻辑 ===
@@ -352,6 +427,7 @@ createApp({
             else if (uploadTargetType.value === 'icon') {
                 const key = uploadTargetIndex.value;
                 if (desktopApps[key]) desktopApps[key].img = url;
+                if (desktopAppsPage2[key]) desktopAppsPage2[key].img = url;
                 if (dockApps[key]) dockApps[key].img = url;
             } else if (uploadTargetType.value === 'qq-wallpaper-universal') {
                 qqData.universalWallpaper = url;
@@ -440,6 +516,12 @@ createApp({
                      if(resetDesktop[k]) Object.assign(desktopApps[k], resetDesktop[k]);
                      else if(desktopApps[k].img) desktopApps[k].img = ''; // 如果是旧代码里没有的App，至少清空图片
                 }
+
+                const resetDesktop2 = JSON.parse(JSON.stringify(defaultData.desktopAppsPage2));
+                for(const k in desktopAppsPage2) {
+                    if(resetDesktop2[k]) Object.assign(desktopAppsPage2[k], resetDesktop2[k]);
+                    else if(desktopAppsPage2[k].img) desktopAppsPage2[k].img = '';
+                }
                 
                 const resetDock = JSON.parse(JSON.stringify(defaultData.dockApps));
                 for(const k in dockApps) {
@@ -449,6 +531,9 @@ createApp({
 
                 textWidgets.splice(0, textWidgets.length, ...JSON.parse(JSON.stringify(defaultData.textWidgets)));
                 
+                // 重置QQ通用壁纸
+                qqData.universalWallpaper = '';
+
                 alert("✅ 美化已重置");
                 
                 // 重置完成，恢复保存功能，并强制保存一次
@@ -458,8 +543,8 @@ createApp({
         };
 
         return {
-            wallpaper, avatar, profile, colors, photos, desktopApps, dockApps, textWidgets,
-            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen,
+            wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets,
+            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen, isWorldbookOpen,
             activeModal, tempText, tempInputVal, editTargetLabel, fileInput,
             apiConfig, modelList, savedApis, qqData, themeState,
             uploadTargetType, uploadTargetIndex, customFrames, presetFrames,

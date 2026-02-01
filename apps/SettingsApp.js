@@ -1,5 +1,5 @@
 // apps/SettingsApp.js
-import { reactive } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
+import { reactive, watch } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
 
 export default {
     props: {
@@ -11,6 +11,44 @@ export default {
     emits: ['close', 'update:modelList'],
     setup(props, { emit }) {
         const apiStatus = reactive({ loading: false, msg: '', type: '', errorType: '' });
+        const storageInfo = reactive({ used: 0, quota: 0, percent: 0, usedStr: '0 B', quotaStr: '0 B' });
+
+        const formatSize = (bytes) => {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        };
+
+        const updateStorage = async () => {
+            if (navigator.storage && navigator.storage.estimate) {
+                try {
+                    const estimate = await navigator.storage.estimate();
+                    storageInfo.used = estimate.usage || 0;
+                    storageInfo.quota = estimate.quota || 0;
+                    // 避免除以零
+                    if (storageInfo.quota > 0) {
+                        storageInfo.percent = Math.min((storageInfo.used / storageInfo.quota) * 100, 100);
+                    } else {
+                        storageInfo.percent = 0;
+                    }
+                    storageInfo.usedStr = formatSize(storageInfo.used);
+                    storageInfo.quotaStr = formatSize(storageInfo.quota);
+                } catch (e) {
+                    console.error("Storage estimate failed", e);
+                }
+            }
+        };
+
+        watch(() => props.isOpen, (newVal) => {
+            if (newVal) {
+                updateStorage();
+            }
+        });
+
+        // 初始化调用
+        updateStorage();
 
         const saveCurrentApi = () => {
             if (!props.apiConfig.endpoint || !props.apiConfig.key) {
@@ -131,12 +169,12 @@ export default {
             props.apiConfig.temperature = 1;
         }
 
-        return { apiStatus, saveCurrentApi, loadSavedApi, deleteSavedApi, fetchModels };
+        return { apiStatus, saveCurrentApi, loadSavedApi, deleteSavedApi, fetchModels, storageInfo };
     },
     template: `
     <div class="app-window" :class="{ open: isOpen }">
-        <div class="app-header">
-            <div class="app-header-title">系统设置</div>
+        <div class="app-header" style="height: 60px; background: #ffffff; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-bottom: none;">
+            <div class="app-header-title" style="font-size: 19px; font-weight: bold; letter-spacing: 1px;">系统设置</div>
             <div class="app-header-close" @click="$emit('close')">完成</div>
         </div>
         <div class="app-content">
@@ -173,7 +211,7 @@ export default {
             <div class="settings-group">
                 <div class="settings-item">
                     <span class="item-label">AI 模型</span>
-                    <select v-model="apiConfig.model" style="border: none; background: transparent; font-size: 14px; color: #007aff; outline: none; text-align: right; max-width: 150px;" :disabled="modelList.length === 0">
+                    <select v-model="apiConfig.model" style="border: none; background: transparent; font-size: 14px; color: var(--accent-color); outline: none; text-align: right; max-width: 150px;" :disabled="modelList.length === 0">
                         <option value="" disabled>请先获取模型</option>
                         <option v-for="m in modelList" :key="m" :value="m">{{ m }}</option>
                     </select>
@@ -188,11 +226,25 @@ export default {
                         max="2"
                         step="0.1"
                         v-model.number="apiConfig.temperature"
-                        style="width: 150px; margin: 0 10px;"
+                        style="width: 150px; margin: 0 10px; accent-color: var(--accent-color);"
                     >
-                    <span style="font-size: 13px; color: #007aff; min-width: 32px; display: inline-block; text-align: right;">
+                    <span style="font-size: 13px; color: var(--accent-color); min-width: 32px; display: inline-block; text-align: right;">
                         {{ apiConfig.temperature.toFixed(1) }}
                     </span>
+                </div>
+            </div>
+
+            <div style="font-size: 13px; color: #888; margin-bottom: 8px; margin-left: 15px; margin-top: 20px;">存储空间</div>
+            <div class="settings-group" style="padding: 15px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
+                    <span>已用容量</span>
+                    <span style="color: #888;">{{ storageInfo.usedStr }} / {{ storageInfo.quotaStr }}</span>
+                </div>
+                <div style="width: 100%; height: 8px; background: #f0f0f0; border-radius: 4px; overflow: hidden;">
+                    <div :style="{ width: storageInfo.percent + '%', background: 'var(--accent-color)' }" style="height: 100%; transition: width 0.3s ease;"></div>
+                </div>
+                <div style="font-size: 12px; color: #aaa; margin-top: 8px; text-align: right;">
+                    {{ storageInfo.percent.toFixed(1) }}% 已使用
                 </div>
             </div>
         </div>

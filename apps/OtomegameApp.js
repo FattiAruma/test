@@ -749,7 +749,7 @@ export default {
                 </svg>
             </button>
             
-            <div class="header-title" style="font-size: 20px; font-weight: bold; letter-spacing: 1px;">
+            <div class="header-title" style="font-size: 19px; font-weight: bold; letter-spacing: 1px;">
                 选择场景
             </div>
             
