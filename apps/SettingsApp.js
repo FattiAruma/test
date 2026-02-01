@@ -11,112 +11,6 @@ export default {
     emits: ['close', 'update:modelList'],
     setup(props, { emit }) {
         const apiStatus = reactive({ loading: false, msg: '', type: '', errorType: '' });
-        const storageInfo = reactive({ used: 0, quota: 0, percent: 0, usedStr: '0 B', quotaStr: '0 B' });
-
-        const formatSize = (bytes) => {
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        };
-
-        const STORAGE_KEY = 'mySpaceData_v6_vue_split';
-
-        const compactStorage = async () => {
-            if (apiStatus.loading) return;
-            if (!confirm("这将重置数据库以清除碎片并释放空间。\n(您的数据不会丢失，但建议先备份)")) return;
-            
-            apiStatus.loading = true;
-            apiStatus.msg = "正在整理数据库...";
-            apiStatus.type = "info";
-            
-            try {
-                // 1. 读取当前数据
-                const currentData = await localforage.getItem(STORAGE_KEY);
-                if (!currentData) throw new Error("读取数据失败，取消操作");
-                
-                // 2. 清空数据库 (这将清除所有碎片和日志)
-                await localforage.clear();
-                
-                // 3. 重新写入数据
-                await localforage.setItem(STORAGE_KEY, currentData);
-                
-                // 4. 刷新显示
-                await updateStorage();
-                
-                apiStatus.msg = "✅ 空间已释放";
-                apiStatus.type = "success";
-            } catch (e) {
-                console.error("Compact failed", e);
-                apiStatus.msg = "❌ 整理失败: " + e.message;
-                apiStatus.type = "error";
-            } finally {
-                apiStatus.loading = false;
-                setTimeout(() => {
-                    if (apiStatus.msg.includes('整理')) apiStatus.msg = '';
-                }, 3000);
-            }
-        };
-
-        const updateStorage = async () => {
-            let totalUsed = 0;
-            let totalQuota = 0;
-
-            // 1. 计算 LocalStorage 使用量 (字符数 * 2 近似字节)
-            try {
-                for (let i = 0; i < localStorage.length; i++) {
-                    const key = localStorage.key(i);
-                    const val = localStorage.getItem(key);
-                    if (key && val) {
-                        totalUsed += (key.length + val.length) * 2;
-                    }
-                }
-                console.log("LocalStorage used:", totalUsed);
-            } catch (e) {
-                console.warn("LocalStorage access error:", e);
-            }
-
-            // 2. 获取浏览器存储估算 (IndexedDB, Cache 等)
-            // 由于已升级到 IndexedDB 存储，现在可以使用完整的磁盘配额
-            if (navigator.storage && navigator.storage.estimate) {
-                try {
-                    const estimate = await navigator.storage.estimate();
-                    // 使用浏览器报告的总使用量 (通常包含 IndexedDB, Cache, Service Worker 等)
-                    if (estimate.usage) totalUsed = estimate.usage;
-                    totalQuota = estimate.quota || 0;
-                } catch (e) {
-                    console.error("Storage estimate failed", e);
-                }
-            }
-
-            // 3. 如果无法获取配额或配额为0，设置默认显示值
-            if (totalQuota === 0) {
-                totalQuota = 1024 * 1024 * 1024; // 1GB
-            }
-
-            storageInfo.used = totalUsed;
-            storageInfo.quota = totalQuota;
-            
-            // 计算百分比
-            if (storageInfo.quota > 0) {
-                storageInfo.percent = Math.min((storageInfo.used / storageInfo.quota) * 100, 100);
-            } else {
-                storageInfo.percent = 0;
-            }
-            
-            storageInfo.usedStr = formatSize(storageInfo.used);
-            storageInfo.quotaStr = formatSize(storageInfo.quota);
-        };
-
-        watch(() => props.isOpen, (newVal) => {
-            if (newVal) {
-                updateStorage();
-            }
-        });
-
-        // 初始化调用
-        updateStorage();
 
         const saveCurrentApi = () => {
             if (!props.apiConfig.endpoint || !props.apiConfig.key) {
@@ -237,7 +131,7 @@ export default {
             props.apiConfig.temperature = 1;
         }
 
-        return { apiStatus, saveCurrentApi, loadSavedApi, deleteSavedApi, fetchModels, storageInfo, updateStorage, compactStorage };
+        return { apiStatus, saveCurrentApi, loadSavedApi, deleteSavedApi, fetchModels };
     },
     template: `
     <div class="app-window" :class="{ open: isOpen }">
@@ -302,26 +196,6 @@ export default {
                 </div>
             </div>
 
-            <div style="font-size: 13px; color: #888; margin-bottom: 8px; margin-left: 15px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center;">
-                <span>存储空间</span>
-                <div style="margin-right: 15px;">
-                    <span @click="compactStorage" style="color: #ff9500; cursor: pointer; margin-right: 10px; font-size: 12px;">🧹 压缩空间</span>
-                    <span @click="updateStorage" style="color: var(--accent-color); cursor: pointer;">🔄 刷新</span>
-                </div>
-            </div>
-            <div class="settings-group" style="padding: 15px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
-                    <span>已用容量</span>
-                    <span style="color: #888;">{{ storageInfo.usedStr }} / {{ storageInfo.quotaStr }}</span>
-                </div>
-                <div style="width: 100%; height: 8px; background: #f0f0f0; border-radius: 4px; overflow: hidden;">
-                    <div :style="{ width: storageInfo.percent + '%', background: 'var(--accent-color)' }" style="height: 100%; transition: width 0.3s ease;"></div>
-                </div>
-                <div style="display: flex; justify-content: space-between; margin-top: 8px;">
-                    <span style="font-size: 12px; color: #aaa;">统计可能有延迟</span>
-                    <span style="font-size: 12px; color: #aaa;">{{ storageInfo.percent.toFixed(1) }}% 已使用</span>
-                </div>
-            </div>
         </div>
     </div>
     `

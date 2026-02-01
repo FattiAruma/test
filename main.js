@@ -6,9 +6,10 @@ import ThemeApps from './apps/ThemeApps.js';
 import TypefaceApp from './apps/TypefaceApp.js';
 import OtomegameApp from './apps/OtomegameApp.js';
 import WorldbookApp from './apps/WorldbookApp.js';
+import SavedataApp from './apps/SavedataApp.js';
 
 createApp({
-    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp, OtomegameApp, WorldbookApp },
+    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp, OtomegameApp, WorldbookApp, SavedataApp },
     setup() {
         // === 1. 定义默认数据 ===
         const defaultData = {
@@ -53,7 +54,9 @@ createApp({
         };
 
         // === 2. 响应式状态 ===
-        const wallpaper = ref(defaultData.wallpaper);
+        // 尝试从 localStorage 同步读取壁纸，以避免刷新时的闪烁
+        const quickWallpaper = localStorage.getItem('quick_wallpaper');
+        const wallpaper = ref(quickWallpaper || defaultData.wallpaper);
         const avatar = reactive({ ...defaultData.avatar });
         const profile = reactive({ ...defaultData.profile });
         const colors = reactive({ ...defaultData.colors });
@@ -90,6 +93,7 @@ createApp({
         const isFontOpen = ref(false);
         const isOtomegameOpen = ref(false);
         const isWorldbookOpen = ref(false);
+        const isSavedataOpen = ref(false);
 
         // 页面滑动
         const currentPage = ref(0);
@@ -151,7 +155,8 @@ createApp({
                     if (localSaved) {
                         console.log("🔄 检测到旧版存档，正在迁移到大容量存储...");
                         saved = localSaved;
-                        // 迁移成功后，可以考虑清除旧的 localStorage，这里暂时保留作为备份
+                        // 标记需要清理旧数据
+                        localStorage.removeItem(STORAGE_KEY);
                     }
                 }
 
@@ -159,7 +164,11 @@ createApp({
                     const data = JSON.parse(saved);
                     
                     // 逐项恢复数据
-                    if(data.wallpaper) wallpaper.value = data.wallpaper;
+                    if(data.wallpaper) {
+                        wallpaper.value = data.wallpaper;
+                        // 确保下次加载能用上快速读取
+                        localStorage.setItem('quick_wallpaper', data.wallpaper);
+                    }
                     if(data.avatar) Object.assign(avatar, data.avatar);
                     if(data.profile) Object.assign(profile, data.profile);
                     if(data.colors) Object.assign(colors, data.colors);
@@ -228,10 +237,9 @@ createApp({
                 };
                 try { 
                     await localforage.setItem(STORAGE_KEY, JSON.stringify(dataToSave)); 
-                    // 保存成功后，清理旧的 LocalStorage 以释放空间并避免双重占用
-                    if (localStorage.getItem(STORAGE_KEY)) {
-                        localStorage.removeItem(STORAGE_KEY);
-                    }
+                    // 同步保存壁纸到 localStorage 以便快速加载
+                    localStorage.setItem('quick_wallpaper', wallpaper.value);
+                    // console.log("Saved to IndexedDB");
                 } catch (e) {
                     console.error("Save failed", e);
                     alert("⚠️ 保存失败: " + e.message);
@@ -413,6 +421,7 @@ createApp({
             else if (key === 'font') isFontOpen.value = true;
             else if (key === 'otomegame') isOtomegameOpen.value = true;
             else if (key === 'world') isWorldbookOpen.value = true;
+            else if (key === 'storage') isSavedataOpen.value = true;
         };
 
         // === 4. 强制链接上传逻辑 ===
@@ -520,6 +529,7 @@ createApp({
                 isDataLoaded.value = false; 
 
                 wallpaper.value = defaultData.wallpaper;
+                localStorage.removeItem('quick_wallpaper'); // 清除快速加载缓存
                 Object.assign(avatar, defaultData.avatar);
                 Object.assign(profile, defaultData.profile);
                 Object.assign(colors, defaultData.colors);
@@ -559,7 +569,7 @@ createApp({
 
         return {
             wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets,
-            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen, isWorldbookOpen,
+            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen, isWorldbookOpen, isSavedataOpen,
             activeModal, tempText, tempInputVal, editTargetLabel, fileInput,
             apiConfig, modelList, savedApis, qqData, themeState,
             uploadTargetType, uploadTargetIndex, customFrames, presetFrames,

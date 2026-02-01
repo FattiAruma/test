@@ -59,9 +59,9 @@ export default {
         // 新增：世界书列表状态
         const isWorldbookDropdownOpen = ref(false);
         const availableWorldbooks = ref([]);
-        const loadWorldbooks = () => {
+        const loadWorldbooks = async () => {
             try {
-                const saved = localStorage.getItem('worldbooks');
+                const saved = await localforage.getItem('worldbooks');
                 if (saved) {
                     availableWorldbooks.value = JSON.parse(saved);
                 } else {
@@ -704,7 +704,8 @@ const generateHiddenThought = async (chat, baseUrl) => {
                 // 注入世界书内容
                 if (chat.selectedWorldbooks && chat.selectedWorldbooks.length > 0) {
                     try {
-                        const allBooks = JSON.parse(localStorage.getItem('worldbooks') || '[]');
+                        const saved = await localforage.getItem('worldbooks');
+                        const allBooks = JSON.parse(saved || '[]');
                         const selectedBooks = allBooks.filter(b => chat.selectedWorldbooks.includes(b.id));
                         if (selectedBooks.length > 0) {
                             systemPrompt += `\n\n【世界书/背景设定】：\n`;

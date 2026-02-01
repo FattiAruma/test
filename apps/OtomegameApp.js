@@ -1,5 +1,4 @@
-// apps/OtomegameApp.js
-import { ref, reactive, computed, watch, nextTick } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
+import { ref, reactive, computed, watch, nextTick, onMounted } from 'https://unpkg.com/vue@3/dist/vue.esm-browser.js';
 
 export default {
     props: {
@@ -48,13 +47,12 @@ export default {
             }
         ];
         
-        // 从 localStorage 读取场景
-        const storedScenes = localStorage.getItem('otome_scenes');
-        const scenes = ref(storedScenes ? JSON.parse(storedScenes) : defaultScenes);
+        // 场景数据 (初始为默认，稍后异步加载)
+        const scenes = ref(defaultScenes);
         
         // 监听场景变化并保存
-        watch(scenes, (newVal) => {
-            localStorage.setItem('otome_scenes', JSON.stringify(newVal));
+        watch(scenes, async (newVal) => {
+            await localforage.setItem('otome_scenes', JSON.stringify(newVal));
         }, { deep: true });
         
         // 模态框状态
@@ -65,7 +63,12 @@ export default {
         const isGameInterfaceOpen = ref(false); // 游戏互动界面
         const isSettingsOpen = ref(false); // 设置弹窗
         const isCustomReplyOpen = ref(false); // 自定义回复弹窗
+        const isExitModalOpen = ref(false); // 退出确认弹窗
+        const isStoryLogOpen = ref(false); // 剧情记录弹窗
         
+        // 已保存的剧情
+        const savedStories = ref([]);
+
         // 当前选择的场景
         const selectedScene = ref(null);
         
@@ -95,14 +98,6 @@ export default {
 
         // 角色配置存储
         const roleSettings = ref({});
-        try {
-            const storedSettings = localStorage.getItem('otome_role_settings');
-            if (storedSettings) {
-                roleSettings.value = JSON.parse(storedSettings);
-            }
-        } catch (e) {
-            console.error('Failed to load role settings', e);
-        }
         
         // 游戏对话内容
         const dialogueText = ref('欢迎来到恋爱轮盘！点击右上角设置开始配置你的故事...');
@@ -130,16 +125,6 @@ export default {
             imageSize: 300,
             imagePosition: { x: 0, y: 0 }
         });
-
-        // 尝试恢复上次的新增角色表单
-        try {
-            const storedCharForm = localStorage.getItem('otome_char_form');
-            if (storedCharForm) {
-                Object.assign(characterForm, JSON.parse(storedCharForm));
-            }
-        } catch (e) {
-            console.error('Failed to load character form', e);
-        }
         
         // 场景配置表单（已有角色）
         const sceneForm = reactive({
@@ -268,6 +253,56 @@ export default {
             selectedContact.value = null;
             resetGame();
         };
+
+        // 处理返回按钮点击
+        const handleBackClick = () => {
+            // 如果游戏已经开始且有对话历史（除了初始的system和user prompt），则询问是否保存
+            if (isGameStarted.value && chatHistory.value.length > 2) {
+                isExitModalOpen.value = true;
+            } else {
+                backToSceneList();
+            }
+        };
+
+        // 确认退出
+        const confirmExit = async (save) => {
+            if (save) {
+                const roleName = currentMode.value === 'new' ? characterForm.name : selectedContact.value.name;
+                
+                // 过滤掉 system 消息和初始设置消息
+                const cleanHistory = chatHistory.value.filter(msg => {
+                    if (msg.role === 'system') return false;
+                    // 简单的判断：如果内容包含 "角色人设" 且是 user 发送的，认为是初始设置
+                    if (msg.role === 'user' && msg.content.includes('角色人设')) return false;
+                    return true;
+                });
+
+                const story = {
+                    id: Date.now(),
+                    date: new Date().toLocaleString(),
+                    scene: selectedScene.value.name,
+                    role: roleName,
+                    history: JSON.parse(JSON.stringify(cleanHistory))
+                };
+                savedStories.value.unshift(story); // 添加到开头
+                await localforage.setItem('otome_saved_stories', JSON.stringify(savedStories.value));
+            }
+            isExitModalOpen.value = false;
+            backToSceneList();
+        };
+
+        // 打开剧情记录
+        const openStoryLog = () => {
+            isStoryLogOpen.value = true;
+        };
+
+        // 删除剧情记录
+        const deleteStory = async (id) => {
+            if (confirm('确定要删除这条记录吗？')) {
+                savedStories.value = savedStories.value.filter(s => s.id !== id);
+                await localforage.setItem('otome_saved_stories', JSON.stringify(savedStories.value));
+            }
+        };
         
         // 返回联系人列表
         const backToContactList = () => {
@@ -288,20 +323,9 @@ export default {
         const isPresetModalOpen = ref(false);
         const presetNameInput = ref('');
 
-        // 加载预设
-        try {
-            const storedScenePresets = localStorage.getItem('otome_scene_presets');
-            if (storedScenePresets) scenePresets.value = JSON.parse(storedScenePresets);
-            
-            const storedCharPresets = localStorage.getItem('otome_character_presets');
-            if (storedCharPresets) characterPresets.value = JSON.parse(storedCharPresets);
-        } catch (e) {
-            console.error('Failed to load presets', e);
-        }
-
         // 监听预设变化并保存
-        watch(scenePresets, (val) => localStorage.setItem('otome_scene_presets', JSON.stringify(val)), { deep: true });
-        watch(characterPresets, (val) => localStorage.setItem('otome_character_presets', JSON.stringify(val)), { deep: true });
+        watch(scenePresets, async (val) => await localforage.setItem('otome_scene_presets', JSON.stringify(val)), { deep: true });
+        watch(characterPresets, async (val) => await localforage.setItem('otome_character_presets', JSON.stringify(val)), { deep: true });
 
         // 打开预设管理模态框
         const openPresetModal = () => {
@@ -425,7 +449,7 @@ export default {
         };
 
         // 保存配置
-        const saveSettings = () => {
+        const saveSettings = async () => {
             if (currentMode.value === 'new') {
                 if (!characterForm.name.trim()) {
                     alert('请输入角色名字');
@@ -436,7 +460,7 @@ export default {
                     return;
                 }
                 // 保存新增角色的表单数据
-                localStorage.setItem('otome_char_form', JSON.stringify(characterForm));
+                await localforage.setItem('otome_char_form', JSON.stringify(characterForm));
                 
                 dialogueText.value = `配置已保存！点击对话框开始剧情...`;
             } else {
@@ -449,7 +473,7 @@ export default {
                         imageSize: sceneForm.imageSize,
                         imagePosition: sceneForm.imagePosition
                     };
-                    localStorage.setItem('otome_role_settings', JSON.stringify(roleSettings.value));
+                    await localforage.setItem('otome_role_settings', JSON.stringify(roleSettings.value));
                 }
                 dialogueText.value = `配置已保存！点击对话框开始剧情...`;
             }
@@ -563,8 +587,8 @@ export default {
                     result.text = result.text.replace(/\\n/g, '').replace(/[\r\n]/g, '').trim();
                 }
                 
-                // 将 AI 回复加入历史
-                chatHistory.value.push({ role: 'assistant', content: content });
+                // 将 AI 回复加入历史 (存纯文本，避免 JSON 格式泄露到剧情回顾)
+                chatHistory.value.push({ role: 'assistant', content: result.text });
                 
                 // 处理文本：按句子分割
                 // 简单的分割逻辑：按 。！？分割，保留标点
@@ -682,6 +706,89 @@ export default {
             return data.choices[0].message.content;
         };
 
+        // 加载数据的函数
+        const loadOtomeData = async () => {
+            try {
+                // 1. Scenes
+                let storedScenes = await localforage.getItem('otome_scenes');
+                if (!storedScenes) {
+                    const local = localStorage.getItem('otome_scenes');
+                    if (local) {
+                        console.log("🔄 [Otomegame] 迁移场景数据...");
+                        storedScenes = local;
+                        await localforage.setItem('otome_scenes', local);
+                        localStorage.removeItem('otome_scenes');
+                    }
+                }
+                if (storedScenes) scenes.value = JSON.parse(storedScenes);
+
+                // 2. Role Settings
+                let storedSettings = await localforage.getItem('otome_role_settings');
+                if (!storedSettings) {
+                    const local = localStorage.getItem('otome_role_settings');
+                    if (local) {
+                        console.log("🔄 [Otomegame] 迁移角色设置...");
+                        storedSettings = local;
+                        await localforage.setItem('otome_role_settings', local);
+                        localStorage.removeItem('otome_role_settings');
+                    }
+                }
+                if (storedSettings) roleSettings.value = JSON.parse(storedSettings);
+
+                // 3. Character Form
+                let storedCharForm = await localforage.getItem('otome_char_form');
+                if (!storedCharForm) {
+                    const local = localStorage.getItem('otome_char_form');
+                    if (local) {
+                        console.log("🔄 [Otomegame] 迁移角色表单...");
+                        storedCharForm = local;
+                        await localforage.setItem('otome_char_form', local);
+                        localStorage.removeItem('otome_char_form');
+                    }
+                }
+                if (storedCharForm) Object.assign(characterForm, JSON.parse(storedCharForm));
+
+                // 4. Scene Presets
+                let storedScenePresets = await localforage.getItem('otome_scene_presets');
+                if (!storedScenePresets) {
+                    const local = localStorage.getItem('otome_scene_presets');
+                    if (local) {
+                        console.log("🔄 [Otomegame] 迁移场景预设...");
+                        storedScenePresets = local;
+                        await localforage.setItem('otome_scene_presets', local);
+                        localStorage.removeItem('otome_scene_presets');
+                    }
+                }
+                if (storedScenePresets) scenePresets.value = JSON.parse(storedScenePresets);
+
+                // 5. Character Presets
+                let storedCharPresets = await localforage.getItem('otome_character_presets');
+                if (!storedCharPresets) {
+                    const local = localStorage.getItem('otome_character_presets');
+                    if (local) {
+                        console.log("🔄 [Otomegame] 迁移角色预设...");
+                        storedCharPresets = local;
+                        await localforage.setItem('otome_character_presets', local);
+                        localStorage.removeItem('otome_character_presets');
+                    }
+                }
+                if (storedCharPresets) characterPresets.value = JSON.parse(storedCharPresets);
+
+                // 6. Saved Stories
+                let storedStories = await localforage.getItem('otome_saved_stories');
+                if (storedStories) savedStories.value = JSON.parse(storedStories);
+
+                console.log("✅ [Otomegame] 数据加载/迁移完成");
+
+            } catch (e) {
+                console.error("Failed to load otome data", e);
+            }
+        };
+
+        onMounted(() => {
+            loadOtomeData();
+        });
+
         return {
             themes,
             currentTheme,
@@ -694,6 +801,9 @@ export default {
             isGameInterfaceOpen,
             isSettingsOpen,
             isCustomReplyOpen,
+            isExitModalOpen,
+            isStoryLogOpen,
+            savedStories,
             selectedScene,
             currentMode,
             contacts,
@@ -718,6 +828,10 @@ export default {
             selectNewRole,
             selectContact,
             backToSceneList,
+            handleBackClick,
+            confirmExit,
+            openStoryLog,
+            deleteStory,
             backToContactList,
             openSettings,
             saveSettings,
@@ -753,10 +867,15 @@ export default {
                 选择场景
             </div>
             
+            <button @click="openStoryLog" class="header-btn" style="position: absolute; right: 55px;" :style="{ color: currentThemeConfig.primary }">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
+                </svg>
+            </button>
             <button @click="isThemeModalOpen = true" class="header-btn" style="position: absolute; right: 15px;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                     <circle cx="12" cy="12" r="3"></circle>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                 </svg>
             </button>
         </div>
@@ -972,7 +1091,7 @@ export default {
             
             <!-- 顶部工具栏 -->
             <div class="game-toolbar">
-                <button @click="backToSceneList" class="toolbar-btn">
+                <button @click="handleBackClick" class="toolbar-btn">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
                         <path d="M19 12H5M12 19l-7-7 7-7"/>
                     </svg>
@@ -981,7 +1100,7 @@ export default {
                 <button @click="openSettings" class="toolbar-btn">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="3"></circle>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
                     </svg>
                 </button>
             </div>
@@ -1244,6 +1363,57 @@ export default {
                     <button @click="isCustomReplyOpen = false" class="modal-btn cancel">取消</button>
                     <button @click="sendCustomReply" class="modal-btn confirm">发送</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- 退出确认弹窗 -->
+        <div v-if="isExitModalOpen" class="modal-overlay center-popup" style="z-index: 4000;" @click.self="isExitModalOpen = false">
+            <div class="modal-content otomegame-modal">
+                <div class="modal-title">退出游戏</div>
+                <div style="text-align: center; margin-bottom: 20px; color: #666;">
+                    是否要保存当前的剧情记录？
+                </div>
+                <div class="modal-buttons" style="flex-direction: column;">
+                    <button @click="confirmExit(true)" class="modal-btn confirm" style="margin-bottom: 10px;">记录剧情并退出</button>
+                    <button @click="confirmExit(false)" class="modal-btn cancel">不记录直接退出</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 剧情记录弹窗 -->
+        <div v-if="isStoryLogOpen" class="modal-overlay center-popup" @click.self="isStoryLogOpen = false">
+            <div class="modal-content otomegame-modal" style="height: 70vh; display: flex; flex-direction: column;">
+                <div class="modal-title">剧情回忆录</div>
+                
+                <div v-if="savedStories.length === 0" style="flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #999;">
+                    <div style="font-size: 40px; margin-bottom: 10px;">📖</div>
+                    <div>暂无剧情记录</div>
+                </div>
+
+                <div v-else style="flex: 1; overflow-y: auto; padding-right: 5px;">
+                    <div v-for="story in savedStories" :key="story.id" style="background: #f9f9f9; border-radius: 10px; padding: 15px; margin-bottom: 15px; border: 1px solid #eee;">
+                        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px;">
+                            <div>
+                                <div style="font-weight: bold; font-size: 16px; color: #333;">{{ story.role }}</div>
+                                <div style="font-size: 12px; color: #888;">{{ story.scene }} · {{ story.date }}</div>
+                            </div>
+                            <button @click="deleteStory(story.id)" style="background: none; border: none; color: #ff3b30; cursor: pointer; padding: 5px;">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M3 6h18M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <div style="max-height: 150px; overflow-y: auto; font-size: 14px; color: #555; line-height: 1.5; background: #fff; padding: 10px; border-radius: 8px;">
+                            <div v-for="(msg, idx) in story.history" :key="idx" v-show="msg.role !== 'system'" style="margin-bottom: 8px;">
+                                <span v-if="msg.role === 'user'" style="color: #007aff; font-weight: bold;">你：</span>
+                                <span v-else-if="msg.role === 'assistant'" style="color: #ff69b4; font-weight: bold;">{{ story.role }}：</span>
+                                <span>{{ msg.content }}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button @click="isStoryLogOpen = false" class="modal-btn confirm" style="margin-top: 15px; flex: none;">关闭</button>
             </div>
         </div>
     </div>

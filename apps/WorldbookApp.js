@@ -17,9 +17,23 @@ export default {
         });
 
         // 从 localStorage 加载数据
-        const loadBooks = () => {
+        const loadBooks = async () => {
             try {
-                const saved = localStorage.getItem('worldbooks');
+                // 优先从 IndexedDB 读取
+                let saved = await localforage.getItem('worldbooks');
+                
+                // 迁移逻辑
+                if (!saved) {
+                    const localSaved = localStorage.getItem('worldbooks');
+                    if (localSaved) {
+                        console.log("🔄 [Worldbook] 迁移旧数据到 IndexedDB...");
+                        saved = localSaved;
+                        // 保存到新存储并清理旧存储
+                        await localforage.setItem('worldbooks', saved);
+                        localStorage.removeItem('worldbooks');
+                    }
+                }
+
                 if (saved) {
                     worldbooks.value = JSON.parse(saved);
                 }
@@ -29,8 +43,8 @@ export default {
         };
         
         // 保存数据到 localStorage
-        const saveToStorage = () => {
-            localStorage.setItem('worldbooks', JSON.stringify(worldbooks.value));
+        const saveToStorage = async () => {
+            await localforage.setItem('worldbooks', JSON.stringify(worldbooks.value));
         };
 
         onMounted(() => {

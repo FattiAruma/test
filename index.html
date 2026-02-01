@@ -158,6 +158,11 @@
             @close="isWorldbookOpen = false">
         </worldbook-app>
 
+        <savedata-app 
+            :is-open="isSavedataOpen"
+            @close="isSavedataOpen = false">
+        </savedata-app>
+
         <!-- === 弹窗 === -->
         <div class="modal-overlay" v-if="activeModal === 'singleEdit'" @click.self="activeModal = null">
             <div class="modal-content">

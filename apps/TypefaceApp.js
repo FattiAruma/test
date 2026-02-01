@@ -13,9 +13,24 @@ export default {
         const showPreview = ref(false);
 
         // 从 localStorage 加载已保存的字体设置
-        const loadSavedFont = () => {
-            const savedUrl = localStorage.getItem('customFontUrl');
-            const savedName = localStorage.getItem('customFontName');
+        const loadSavedFont = async () => {
+            let savedUrl = await localforage.getItem('customFontUrl');
+            let savedName = await localforage.getItem('customFontName');
+            
+            // 迁移逻辑
+            if (!savedUrl) {
+                const localUrl = localStorage.getItem('customFontUrl');
+                const localName = localStorage.getItem('customFontName');
+                if (localUrl && localName) {
+                    console.log("🔄 [Typeface] 迁移旧数据到 IndexedDB...");
+                    savedUrl = localUrl;
+                    savedName = localName;
+                    await localforage.setItem('customFontUrl', savedUrl);
+                    await localforage.setItem('customFontName', savedName);
+                    localStorage.removeItem('customFontUrl');
+                    localStorage.removeItem('customFontName');
+                }
+            }
             
             if (savedUrl && savedName) {
                 fontUrl.value = savedUrl;
@@ -100,7 +115,7 @@ export default {
         };
 
         // 应用字体按钮
-        const handleApplyFont = () => {
+        const handleApplyFont = async () => {
             const url = fontUrl.value.trim();
             const name = fontName.value.trim();
 
@@ -113,15 +128,15 @@ export default {
             applyFont(url, name);
 
             // 保存到 localStorage
-            localStorage.setItem('customFontUrl', url);
-            localStorage.setItem('customFontName', name);
+            await localforage.setItem('customFontUrl', url);
+            await localforage.setItem('customFontName', name);
 
             showPreview.value = true;
             alert('✅ 字体已应用！整个网站现在使用新字体。');
         };
 
         // 重置为默认字体
-        const handleResetFont = () => {
+        const handleResetFont = async () => {
             if (!confirm('确定要恢复默认字体吗？')) {
                 return;
             }
@@ -142,8 +157,8 @@ export default {
             document.body.style.fontFamily = '';
 
             // 清除保存的数据
-            localStorage.removeItem('customFontUrl');
-            localStorage.removeItem('customFontName');
+            await localforage.removeItem('customFontUrl');
+            await localforage.removeItem('customFontName');
 
             // 清空输入框
             fontUrl.value = '';
