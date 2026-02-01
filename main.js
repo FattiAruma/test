@@ -228,7 +228,10 @@ createApp({
                 };
                 try { 
                     await localforage.setItem(STORAGE_KEY, JSON.stringify(dataToSave)); 
-                    // console.log("Saved to IndexedDB");
+                    // 保存成功后，清理旧的 LocalStorage 以释放空间并避免双重占用
+                    if (localStorage.getItem(STORAGE_KEY)) {
+                        localStorage.removeItem(STORAGE_KEY);
+                    }
                 } catch (e) {
                     console.error("Save failed", e);
                     alert("⚠️ 保存失败: " + e.message);
