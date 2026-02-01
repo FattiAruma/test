@@ -21,6 +21,44 @@ export default {
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         };
 
+        const STORAGE_KEY = 'mySpaceData_v6_vue_split';
+
+        const compactStorage = async () => {
+            if (apiStatus.loading) return;
+            if (!confirm("这将重置数据库以清除碎片并释放空间。\n(您的数据不会丢失，但建议先备份)")) return;
+            
+            apiStatus.loading = true;
+            apiStatus.msg = "正在整理数据库...";
+            apiStatus.type = "info";
+            
+            try {
+                // 1. 读取当前数据
+                const currentData = await localforage.getItem(STORAGE_KEY);
+                if (!currentData) throw new Error("读取数据失败，取消操作");
+                
+                // 2. 清空数据库 (这将清除所有碎片和日志)
+                await localforage.clear();
+                
+                // 3. 重新写入数据
+                await localforage.setItem(STORAGE_KEY, currentData);
+                
+                // 4. 刷新显示
+                await updateStorage();
+                
+                apiStatus.msg = "✅ 空间已释放";
+                apiStatus.type = "success";
+            } catch (e) {
+                console.error("Compact failed", e);
+                apiStatus.msg = "❌ 整理失败: " + e.message;
+                apiStatus.type = "error";
+            } finally {
+                apiStatus.loading = false;
+                setTimeout(() => {
+                    if (apiStatus.msg.includes('整理')) apiStatus.msg = '';
+                }, 3000);
+            }
+        };
+
         const updateStorage = async () => {
             let totalUsed = 0;
             let totalQuota = 0;
@@ -199,7 +237,7 @@ export default {
             props.apiConfig.temperature = 1;
         }
 
-        return { apiStatus, saveCurrentApi, loadSavedApi, deleteSavedApi, fetchModels, storageInfo, updateStorage };
+        return { apiStatus, saveCurrentApi, loadSavedApi, deleteSavedApi, fetchModels, storageInfo, updateStorage, compactStorage };
     },
     template: `
     <div class="app-window" :class="{ open: isOpen }">
@@ -266,7 +304,10 @@ export default {
 
             <div style="font-size: 13px; color: #888; margin-bottom: 8px; margin-left: 15px; margin-top: 20px; display: flex; justify-content: space-between; align-items: center;">
                 <span>存储空间</span>
-                <span @click="updateStorage" style="color: var(--accent-color); cursor: pointer; margin-right: 15px;">🔄 刷新</span>
+                <div style="margin-right: 15px;">
+                    <span @click="compactStorage" style="color: #ff9500; cursor: pointer; margin-right: 10px; font-size: 12px;">🧹 压缩空间</span>
+                    <span @click="updateStorage" style="color: var(--accent-color); cursor: pointer;">🔄 刷新</span>
+                </div>
             </div>
             <div class="settings-group" style="padding: 15px;">
                 <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
