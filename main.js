@@ -7,9 +7,10 @@ import TypefaceApp from './apps/TypefaceApp.js';
 import OtomegameApp from './apps/OtomegameApp.js';
 import WorldbookApp from './apps/WorldbookApp.js';
 import SavedataApp from './apps/SavedataApp.js';
+import TaobaoApp from './apps/TaobaoApp.js';
 
 createApp({
-    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp, OtomegameApp, WorldbookApp, SavedataApp },
+    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp, OtomegameApp, WorldbookApp, SavedataApp, TaobaoApp },
     setup() {
         // === 1. 定义默认数据 ===
         const defaultData = {
@@ -72,7 +73,7 @@ createApp({
             'https://i.postimg.cc/gj8kWmBY/Magic-Eraser-260125-105728.png',
             'https://i.postimg.cc/W1Xpj9S1/Magic-Eraser-260125-110308.png',
             'https://i.postimg.cc/brYV5KF5/Magic_Eraser_260125_110639.png',
-            'https://i.postimg.cc/90XgkvNv/Magic_Eraser_260125_110709.png',
+            'https://i.postimg.cc/xCXR22Sb/Magic-Eraser-260201-201646.png',
             'https://i.postimg.cc/63D6BfC6/Magic_Eraser_260131_201545.png',
             'https://i.postimg.cc/Y9J2tzQ4/Magic_Eraser_260131_201619.png',
             'https://i.postimg.cc/qR9Bpx2h/Magic_Eraser_260131_201701.png',
@@ -94,6 +95,7 @@ createApp({
         const isOtomegameOpen = ref(false);
         const isWorldbookOpen = ref(false);
         const isSavedataOpen = ref(false);
+        const isTaobaoOpen = ref(false);
 
         // 页面滑动
         const currentPage = ref(0);
@@ -208,6 +210,14 @@ createApp({
                     
                     if(data.qqUniversalWallpaper) qqData.universalWallpaper = data.qqUniversalWallpaper;
 
+                    // 恢复动态页面数据
+                    if(data.qqMomentsBackground) qqData.momentsBackground = data.qqMomentsBackground;
+                    if(data.qqSelfAvatar) qqData.selfAvatar = data.qqSelfAvatar;
+                    if(data.qqSelfName) qqData.selfName = data.qqSelfName;
+                    if(data.qqVisitorCount) qqData.visitorCount = data.qqVisitorCount;
+                    // 新增：恢复说说列表
+                    if(data.qqMomentsList) qqData.momentsList = data.qqMomentsList;
+
                     console.log("✅ 存檔讀取成功 (IndexedDB)");
                 }
             } catch (e) { console.error("讀取存檔失敗", e); }
@@ -233,6 +243,11 @@ createApp({
                     aiGeneralStickers: qqData.aiGeneralStickers,
                     userStickers: qqData.userStickers,
                     qqUniversalWallpaper: qqData.universalWallpaper,
+                    qqMomentsBackground: qqData.momentsBackground,
+                    qqSelfAvatar: qqData.selfAvatar,
+                    qqSelfName: qqData.selfName,
+                    qqVisitorCount: qqData.visitorCount,
+                    qqMomentsList: qqData.momentsList, // 新增：保存说说列表
                     customFrames: customFrames
                 };
                 try { 
@@ -260,14 +275,21 @@ createApp({
             
             // 预设头像框
             presetFrames.forEach((frameUrl, index) => {
-                // 检查是否是需要调整的特定头像框 (索引 6 到 11)
-                const isSpecialFrame = index >= 6 && index <= 11;
-                const transformStyle = isSpecialFrame 
-                    ? 'transform: translate(-50%, -57%) scale(1.07);' // 向上微调并放大
-                    : 'transform: translate(-50%, -50%);'; // 默认居中
+                // 检查是否是需要调整的特定头像框
+                let transformStyle = 'transform: translate(-50%, -50%);'; // 默认居中
 
+                if (index === 3) {
+                    transformStyle = 'transform: translate(-50%, calc(-50% - 3px));'; // 往上微调 1px
+                } else if (index === 5) {
+                    transformStyle = 'transform: translate(calc(-50% - 0.3px), -50%);'; // 往左微调 0.3px
+                } else if (index >= 6 && index <= 11) {
+                    transformStyle = 'transform: translate(-50%, -57%) scale(1.07);'; // 向上微调并放大
+                }
+
+                // 大头像 (主页 + 设置页)
                 css += `
-                    .avatar.preset-frame-${index}::before {
+                    .avatar.preset-frame-${index}::before,
+                    .qq-setting-avatar.preset-frame-${index}::before {
                         content: '';
                         position: absolute;
                         top: 50%;
@@ -281,18 +303,54 @@ createApp({
                         ${transformStyle}
                     }
                 `;
+                
+                // 小头像 (聊天页) - 缩小边框
+                css += `
+                    .chat-avatar-small.preset-frame-${index}::before {
+                        content: '';
+                        position: absolute;
+                        top: 50%;
+                        left: 50%;
+                        width: calc(100% + 8px);
+                        height: calc(100% + 8px);
+                        background-image: url('${frameUrl}');
+                        background-size: cover;
+                        background-position: center;
+                        z-index: -1;
+                        ${transformStyle}
+                    }
+                `;
             });
 
             // 自定义头像框
             customFrames.forEach((frameUrl, index) => {
+                // 大头像
                 css += `
-                    .avatar.custom-frame-${index}::before {
+                    .avatar.custom-frame-${index}::before,
+                    .qq-setting-avatar.custom-frame-${index}::before {
                         content: '';
                         position: absolute;
                         top: 50%;
                         left: 50%;
                         width: calc(100% + 16px);
                         height: calc(100% + 16px);
+                        background-image: url('${frameUrl}');
+                        background-size: cover;
+                        background-position: center;
+                        z-index: -1;
+                        transform: translate(-50%, -50%);
+                    }
+                `;
+                
+                // 小头像
+                css += `
+                    .chat-avatar-small.custom-frame-${index}::before {
+                        content: '';
+                        position: absolute;
+                        top: 50%;
+                        left: 50%;
+                        width: calc(100% + 8px);
+                        height: calc(100% + 8px);
                         background-image: url('${frameUrl}');
                         background-size: cover;
                         background-position: center;
@@ -343,7 +401,7 @@ createApp({
         };
 
         // 监听变化自动保存
-        watch([wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets, customFrames, apiConfig, modelList, savedApis, () => qqData.chatList, () => qqData.aiGeneralStickers, () => qqData.userStickers, () => qqData.universalWallpaper], () => {
+        watch([wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets, customFrames, apiConfig, modelList, savedApis, () => qqData.chatList, () => qqData.aiGeneralStickers, () => qqData.userStickers, () => qqData.universalWallpaper, () => qqData.momentsBackground, () => qqData.selfAvatar, () => qqData.selfName, () => qqData.visitorCount, () => qqData.momentsList], () => {
             saveData();
         }, { deep: true });
         
@@ -422,6 +480,7 @@ createApp({
             else if (key === 'otomegame') isOtomegameOpen.value = true;
             else if (key === 'world') isWorldbookOpen.value = true;
             else if (key === 'storage') isSavedataOpen.value = true;
+            else if (key === 'taobao') isTaobaoOpen.value = true;
         };
 
         // === 4. 强制链接上传逻辑 ===
@@ -569,7 +628,7 @@ createApp({
 
         return {
             wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets,
-            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen, isWorldbookOpen, isSavedataOpen,
+            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen, isWorldbookOpen, isSavedataOpen, isTaobaoOpen,
             activeModal, tempText, tempInputVal, editTargetLabel, fileInput,
             apiConfig, modelList, savedApis, qqData, themeState,
             uploadTargetType, uploadTargetIndex, customFrames, presetFrames,

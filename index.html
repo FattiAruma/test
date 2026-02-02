@@ -122,6 +122,9 @@
             :is-open="isQQOpen" 
             :api-config="apiConfig" 
             :qq-data="qqData"
+            :preset-frames="presetFrames"
+            :custom-frames="customFrames"
+            @frame-action="handleFrameAction"
             @close="isQQOpen = false">
         </q-q-apps>
 
@@ -163,6 +166,11 @@
             @close="isSavedataOpen = false">
         </savedata-app>
 
+        <taobao-app 
+            :is-open="isTaobaoOpen"
+            @close="isTaobaoOpen = false">
+        </taobao-app>
+
         <!-- === 弹窗 === -->
         <div class="modal-overlay" v-if="activeModal === 'singleEdit'" @click.self="activeModal = null">
             <div class="modal-content">
@@ -189,10 +197,6 @@
                 <div class="frame-grid">
                     <div class="frame-option-container" @click="setFrame('')"><div class="frame-preview frame-none"></div><div class="frame-label">无</div></div>
                     <div class="frame-option-container" @click="addCustomFrame"><div class="frame-preview frame-add">+</div><div class="frame-label">自定义</div></div>
-                    <div class="frame-option-container" @click="setFrame('frame-pink')"><div class="frame-preview frame-pink"></div><div class="frame-label">简约粉</div></div>
-                    <div class="frame-option-container" @click="setFrame('frame-gradient')"><div class="frame-preview frame-gradient"></div><div class="frame-label">梦幻紫</div></div>
-                    <div class="frame-option-container" @click="setFrame('frame-stitch')"><div class="frame-preview frame-stitch"></div><div class="frame-label">缝纫风</div></div>
-                    <div class="frame-option-container" @click="setFrame('frame-gold')"><div class="frame-preview frame-gold"></div><div class="frame-label">流光金</div></div>
                     <!-- 预设头像框 -->
                     <div class="frame-option-container" v-for="(frameUrl, index) in presetFrames" :key="'preset-' + index" @click="setFrame('preset-frame-' + index)">
                         <div class="frame-preview" :class="'preset-frame-' + index" :style="{ backgroundImage: 'url(' + frameUrl + ')', backgroundSize: 'cover', backgroundPosition: 'center' }"></div>

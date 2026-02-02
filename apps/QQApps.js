@@ -5,9 +5,11 @@ export default {
     props: {
         isOpen: Boolean,
         apiConfig: Object,
-        qqData: Object
+        qqData: Object,
+        presetFrames: Array,
+        customFrames: Array
     },
-    emits: ['close'],
+    emits: ['close', 'frame-action'],
     setup(props, { emit }) {
         // --- 现有状态 ---
         const isQQSettingsOpen = ref(false);
@@ -59,6 +61,35 @@ export default {
         // 新增：世界书列表状态
         const isWorldbookDropdownOpen = ref(false);
         const availableWorldbooks = ref([]);
+
+        // 新增：头像框选择状态
+        const isFrameModalOpen = ref(false);
+        const frameTarget = ref(''); // 'ai' or 'user'
+
+        // 新增：NPC库相关状态
+        const isNpcManagerOpen = ref(false);
+        const isNpcEditOpen = ref(false); // 保留变量定义以防报错，但不再使用
+        const npcManagerTab = ref('list'); // 'list' | 'add'
+        const tempNpcData = reactive({ name: '', setting: '', relation: '' });
+        const editingNpcIndex = ref(-1);
+
+        // 新增：说说（动态）功能状态
+        const isPublishMomentOpen = ref(false);
+        const momentForm = reactive({
+            content: '',
+            images: [],
+            mentions: [],
+            location: ''
+        });
+        const isAtUserModalOpen = ref(false);
+        const momentImageInput = ref(null);
+
+        // 新增：动态页面滚动透明度
+        const momentsHeaderOpacity = ref(0);
+
+        // 新增：说说菜单
+        const activeMomentMenu = ref(null);
+
         const loadWorldbooks = async () => {
             try {
                 const saved = await localforage.getItem('worldbooks');
@@ -78,6 +109,22 @@ export default {
         onMounted(() => {
             if (!props.qqData.aiGeneralStickers) props.qqData.aiGeneralStickers = [];
             if (!props.qqData.userStickers) props.qqData.userStickers = [];
+            // 新增：动态页面背景和头像
+            if (props.qqData.momentsBackground === undefined) props.qqData.momentsBackground = '';
+            if (props.qqData.selfAvatar === undefined) props.qqData.selfAvatar = '';
+            // 新增：动态页面名字和访客
+            if (props.qqData.selfName === undefined) props.qqData.selfName = '我';
+            if (props.qqData.visitorCount === undefined) props.qqData.visitorCount = 0;
+            // 新增：初始化说说列表
+            if (props.qqData.momentsList === undefined) props.qqData.momentsList = [];
+            // 新增：确保每个说说都有点赞和评论字段
+            if (Array.isArray(props.qqData.momentsList)) {
+                props.qqData.momentsList.forEach(m => {
+                    if (m.likes === undefined) m.likes = [];
+                    if (m.comments === undefined) m.comments = [];
+                    if (m.tempComment === undefined) m.tempComment = '';
+                });
+            }
 
             // ✅ 新增：確保每個 chat 有 heartThoughts 陣列
             if (Array.isArray(props.qqData.chatList)) {
@@ -150,7 +197,11 @@ export default {
         timeAware: false,
         timeOverride: '',
         // 新增：聊天室背景
-        backgroundUrl: ''
+        backgroundUrl: '',
+        // 新增：头像框
+        aiAvatarFrame: '',
+        userAvatarFrame: '',
+        npcList: [] // 新增：NPC库
     };
     props.qqData.chatList.unshift(newChat);
 };
@@ -186,6 +237,11 @@ export default {
             if (chat.timeOverride === undefined) chat.timeOverride = '';
             // 新增：初始化聊天室背景
             if (chat.backgroundUrl === undefined) chat.backgroundUrl = '';
+            // 新增：初始化头像框
+            if (chat.aiAvatarFrame === undefined) chat.aiAvatarFrame = '';
+            if (chat.userAvatarFrame === undefined) chat.userAvatarFrame = '';
+            // 新增：初始化NPC库
+            if (chat.npcList === undefined) chat.npcList = [];
 
             if(chat.currentSummary && typeof chat.currentSummary === 'string') {
                 chat.memoryList.push({ id: Date.now(), content: chat.currentSummary });
@@ -226,10 +282,37 @@ export default {
                 reader.onload = (ev) => {
                     const url = ev.target.result;
                     if(uploadTarget.value === 'ai') tempQQSettings.avatar = url;
-                    else tempQQSettings.userAvatar = url;
+                    else if(uploadTarget.value === 'user') tempQQSettings.userAvatar = url;
+                    else if(uploadTarget.value === 'momentsBg') props.qqData.momentsBackground = url;
+                    else if(uploadTarget.value === 'selfAvatar') props.qqData.selfAvatar = url;
                 };
             }
             e.target.value = '';
+        };
+
+        const triggerMomentsBgUpload = () => {
+            const link = prompt("请输入背景图片链接 (留空则上传本地图片):");
+            if (link) {
+                props.qqData.momentsBackground = link;
+            } else if (link === '') {
+                uploadTarget.value = 'momentsBg';
+                fileInput.value.click();
+            }
+        };
+
+        const triggerSelfAvatarUpload = () => {
+            uploadTarget.value = 'selfAvatar';
+            fileInput.value.click();
+        };
+
+        const editSelfName = () => {
+            const name = prompt("请输入名字", props.qqData.selfName || '我');
+            if (name !== null) props.qqData.selfName = name;
+        };
+
+        const editVisitorCount = () => {
+            const count = prompt("请输入访客数量", props.qqData.visitorCount || 0);
+            if (count !== null) props.qqData.visitorCount = count;
         };
 
         const pushMessage = (chat, role, type, content, extra = {}) => {
@@ -700,6 +783,14 @@ const generateHiddenThought = async (chat, baseUrl) => {
                 if (chat.remark && chat.remark !== chat.name) systemPrompt += `用户对你的备注是：${chat.remark}。`;
                 if (chat.aiPersona) systemPrompt += `\n你的详细人设：${chat.aiPersona}`;
                 if (chat.userPersona) systemPrompt += `\n对话用户（我）的设定：${chat.userPersona}`;
+
+                // 注入 NPC 列表
+                if (chat.npcList && chat.npcList.length > 0) {
+                    systemPrompt += `\n\n【已知 NPC/其他角色】：\n`;
+                    chat.npcList.forEach(npc => {
+                        systemPrompt += `[${npc.name}]: ${npc.setting || ''} (关系: ${npc.relation || '未知'})\n`;
+                    });
+                }
                 
                 // 注入世界书内容
                 if (chat.selectedWorldbooks && chat.selectedWorldbooks.length > 0) {
@@ -930,7 +1021,7 @@ const generateHiddenThought = async (chat, baseUrl) => {
 
                 if (chat.heartThoughts.length > 200) chat.heartThoughts.length = 200;
 
-                // 新增：根据 AI 回覆内容决定最终状态（更精确的判断）
+                // 新增：根据 AI 回覆内容决定最終状态（更精确的判断）
                 const busyKeywords = ['有事', '去忙', '不聊了', '先不聊', '有点事', '再说'];
                 const offlineKeywords = ['睡觉', '关机', '关手机', '没电', '晚安', '睡了'];
                 const futureOrNegationKeywords = ['准备', '打算', '想', '还没', '是不是', '要不要', '差不多' ,'马上', '一会儿', '等会儿', '可能', '应该', '不会', '不想' ,'不打算' ,'等等', '稍后', '也许', '或许', '大概', '不能', '待会'];
@@ -1407,7 +1498,240 @@ const deleteHeartEntry = (chat, idx) => {
     chat.heartThoughts.splice(idx, 1);
 };
 
+// 新增：头像框相关方法
+const openFrameModal = (target) => {
+    frameTarget.value = target;
+    isFrameModalOpen.value = true;
+};
+
+const setFrame = (frame) => {
+    if (frameTarget.value === 'ai') {
+        tempQQSettings.aiAvatarFrame = frame;
+    } else {
+        tempQQSettings.userAvatarFrame = frame;
+    }
+    isFrameModalOpen.value = false;
+};
+
+        const addCustomFrame = () => {
+            emit('frame-action', { type: 'add' });
+        };
+
+        const deleteCustomFrame = (index) => {
+            emit('frame-action', { type: 'delete', index });
+        };
+
+        // --- NPC库管理逻辑 ---
+        const openNpcManager = () => {
+            isNpcManagerOpen.value = true;
+            npcManagerTab.value = 'list';
+        };
+
+        const openNpcEdit = (index = -1) => {
+            editingNpcIndex.value = index;
+            if (index === -1) {
+                // 新增
+                Object.assign(tempNpcData, { name: '', setting: '', relation: '' });
+            } else {
+                // 编辑
+                const npc = tempQQSettings.npcList[index];
+                Object.assign(tempNpcData, JSON.parse(JSON.stringify(npc)));
+            }
+            // 切换到添加/编辑 Tab
+            npcManagerTab.value = 'add';
+        };
+
+        const saveNpc = () => {
+            if (!tempNpcData.name.trim()) {
+                alert("NPC名字不能为空");
+                return;
+            }
+            if (!tempQQSettings.npcList) tempQQSettings.npcList = [];
+            
+            const newNpc = JSON.parse(JSON.stringify(tempNpcData));
+            
+            if (editingNpcIndex.value === -1) {
+                tempQQSettings.npcList.push(newNpc);
+            } else {
+                tempQQSettings.npcList[editingNpcIndex.value] = newNpc;
+            }
+            // 保存后返回列表
+            npcManagerTab.value = 'list';
+        };
+
+        const deleteNpc = (index) => {
+            if (confirm("确定删除这个NPC吗？")) {
+                tempQQSettings.npcList.splice(index, 1);
+            }
+        };
+
+        // --- 说说（动态）功能方法 ---
+
+        // 打开说说发布窗口
+        const openPublishMoment = () => {
+            // 重置表单
+            momentForm.content = '';
+            momentForm.images = [];
+            momentForm.mentions = [];
+            momentForm.location = '';
+            isPublishMomentOpen.value = true;
+        };
+
+        // 触发说说图片上传
+        const triggerMomentImageUpload = () => {
+            momentImageInput.value.click();
+        };
+
+        // 处理说说图片文件
+        const handleMomentImageChange = async (e) => {
+            const files = e.target.files;
+            if (!files) return;
+
+            // 最多上传9张
+            const remainingSlots = 9 - momentForm.images.length;
+            if (files.length > remainingSlots) {
+                alert(`最多还能上传 ${remainingSlots} 张图片。`);
+            }
+
+            for (let i = 0; i < Math.min(files.length, remainingSlots); i++) {
+                const file = files[i];
+                try {
+                    const compressedUrl = await compressImage(file);
+                    momentForm.images.push(compressedUrl);
+                } catch (err) {
+                    console.error("图片压缩失败", err);
+                    alert("有图片处理失败，请重试");
+                }
+            }
+            e.target.value = ''; // 清空以便再次选择
+        };
+        
+        // 删除已选图片
+        const removeMomentImage = (index) => {
+            momentForm.images.splice(index, 1);
+        };
+
+        // 打开 @好友 列表
+        const openAtUserModal = () => {
+            isAtUserModalOpen.value = true;
+        };
+
+        // 切换 @好友 选择
+        const toggleMention = (chat) => {
+            const mention = { id: chat.id, name: chat.remark || chat.name };
+            const index = momentForm.mentions.findIndex(m => m.id === mention.id);
+            if (index > -1) {
+                momentForm.mentions.splice(index, 1);
+            } else {
+                momentForm.mentions.push(mention);
+            }
+        };
+        
+        // 添加地点
+        const addMomentLocation = () => {
+            const location = prompt("请输入地点：", momentForm.location);
+            if (location !== null) {
+                momentForm.location = location;
+            }
+        };
+
+        // 发布说说
+        const publishMoment = () => {
+            if (!momentForm.content.trim() && momentForm.images.length === 0) {
+                alert("内容和图片不能都为空！");
+                return;
+            }
+
+            const newMoment = {
+                id: Date.now(),
+                author: {
+                    name: props.qqData.selfName || '我',
+                    avatar: props.qqData.selfAvatar || ''
+                },
+                content: momentForm.content,
+                images: momentForm.images,
+                mentions: momentForm.mentions,
+                location: momentForm.location,
+                timestamp: Date.now(),
+                time: new Date().toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+                // 新增：初始化点赞和评论
+                likes: [],
+                comments: [],
+                tempComment: ''
+            };
+
+            props.qqData.momentsList.unshift(newMoment);
+            isPublishMomentOpen.value = false;
+        };
+
+        // --- 新增：说说交互方法 ---
+
+        // 点赞/取消点赞
+        const toggleLike = (moment) => {
+            const selfName = props.qqData.selfName || '我';
+            const index = moment.likes.indexOf(selfName);
+            if (index > -1) {
+                moment.likes.splice(index, 1); // 取消点赞
+            } else {
+                moment.likes.push(selfName); // 点赞
+            }
+        };
+
+        // 转发说说 (简单提示)
+        const forwardMoment = (moment) => {
+            alert("功能开发中，敬请期待！");
+        };
+
+        // 提交评论
+        const submitComment = (moment) => {
+            if (!moment.tempComment.trim()) return;
+            moment.comments.push({
+                id: Date.now(),
+                author: props.qqData.selfName || '我',
+                content: moment.tempComment
+            });
+            moment.tempComment = ''; // 清空输入框
+        };
+
+        // 新增：动态页面滚动处理
+        const handleMomentsScroll = (event) => {
+            const scrollTop = event.target.scrollTop;
+            const fadeDistance = 150; // 滚动150px后完全不透明
+            let opacity = scrollTop / fadeDistance;
+            if (opacity > 1) opacity = 1;
+            momentsHeaderOpacity.value = opacity;
+        };
+
+        // 新增：说说菜单控制
+        const toggleMomentMenu = (momentId) => {
+            if (activeMomentMenu.value === momentId) {
+                activeMomentMenu.value = null;
+            } else {
+                activeMomentMenu.value = momentId;
+            }
+        };
+
+        const deleteMoment = (momentId) => {
+            if (confirm("确定要删除这条说说吗？")) {
+                const index = props.qqData.momentsList.findIndex(m => m.id === momentId);
+                if (index > -1) {
+                    props.qqData.momentsList.splice(index, 1);
+                }
+            }
+            activeMomentMenu.value = null; // Close menu after action
+        };
+
+
+        // 颜色配置：衣着(蓝)、行为(绿)、心声(粉)、坏心思(紫)
+        const heartStyles = {
+            clothing: { bg: '#e6f4ff', border: '#91caff', title: '#0050b3', label: '衣着' },
+            behavior: { bg: '#f6ffed', border: '#b7eb8f', title: '#389e0d', label: '行为' },
+            thought:  { bg: '#fff0f6', border: '#ffadd2', title: '#c41d7f', label: '心声' },
+            evil:     { bg: '#f9f0ff', border: '#d3adf7', title: '#531dab', label: '坏心思' }
+        };
+
         return {
+            heartStyles,
             currentHeartIndex, viewHeartAtIndex,
             isQQSettingsOpen, tempQQSettings, chatContainer, fileInput, chatInputRef, imgMsgInput,
             getCurrentChat, handleQQCreate, enterChat, openQQSettings,
@@ -1441,17 +1765,34 @@ const deleteHeartEntry = (chat, idx) => {
             availableWorldbooks,
             isWorldbookDropdownOpen,
             // 清空聊天记录
-            clearChatHistory
+            clearChatHistory,
+            // 头像框
+            isFrameModalOpen, frameTarget, openFrameModal, setFrame, addCustomFrame, deleteCustomFrame,
+            // NPC库
+            isNpcManagerOpen, isNpcEditOpen, npcManagerTab, tempNpcData, editingNpcIndex,
+            openNpcManager, openNpcEdit, saveNpc, deleteNpc,
+            // 动态页面
+            triggerMomentsBgUpload, triggerSelfAvatarUpload,
+            editSelfName, editVisitorCount,
+            handleMomentsScroll, momentsHeaderOpacity,
+            // 说说功能
+            isPublishMomentOpen, momentForm, isAtUserModalOpen, momentImageInput,
+            openPublishMoment, triggerMomentImageUpload, handleMomentImageChange, removeMomentImage,
+            openAtUserModal, toggleMention, addMomentLocation, publishMoment,
+            // 新增：说说交互
+            toggleLike, forwardMoment, submitComment,
+            // 新增：说说菜单
+            activeMomentMenu, toggleMomentMenu, deleteMoment
         };
     },
     template: `
-    <div class="app-window" :class="{ open: isOpen }" @click="hideContextMenu">
+    <div class="app-window" :class="{ open: isOpen }" @click="hideContextMenu(); activeMomentMenu = null">
         <!-- 列表页 -->
         <div v-if="!qqData.currentChatId" style="display:flex; flex-direction:column; height:100%;">
-            <div class="app-header" style="height: 78px; padding-top: 10px; align-items: flex-end; padding-bottom: 10px; position: relative;">
-                <div class="app-header-title" style="margin-bottom: 2px; width: 100%; text-align: center; position: absolute; left:0; bottom: 30px; pointer-events: none;">消息</div>
-                <div class="app-header-close" @click="handleQQCreate" style="font-size: 24px; font-weight: 300; position: absolute; right: 15px; bottom: 26px;">+</div>
-                <div class="app-header-left" @click="$emit('close')" style="font-weight: 400; position: absolute; left: 15px; bottom: 30px;">关闭</div>
+            <div class="app-header" v-if="activeTab !== 'moments'" style="height: calc(60px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); margin-top: 0; align-items: center; position: relative;">
+                <div class="app-header-title" style="width: 100%; text-align: center; pointer-events: none;">消息</div>
+                <div class="app-header-close" @click="handleQQCreate" style="font-size: 24px; font-weight: 300; position: absolute; right: 15px;">+</div>
+                <div class="app-header-left" @click="$emit('close')" style="font-weight: 400; position: absolute; left: 15px;">关闭</div>
             </div>
             <div class="app-content" style="padding: 0; flex: 1; overflow-y: auto;">
                 <div v-show="activeTab === 'msg'" class="qq-list">
@@ -1466,9 +1807,152 @@ const deleteHeartEntry = (chat, idx) => {
                         </div>
                     </div>
                 </div>
-                <div v-show="activeTab === 'moments'" style="display:flex; justify-content:center; align-items:center; height:100%; color:#999; flex-direction:column;">
-                    <div style="font-size:40px; margin-bottom:10px;">🌟</div>
-                    <div>好友动态 (暂无)</div>
+                <div v-show="activeTab === 'moments'" style="position: relative; height: 100%; background: #fff;">
+                    <!-- 渐变顶部导航栏 (现在固定在最上层) -->
+                    <div :style="{ 
+                            backgroundColor: 'rgba(255, 255, 255, ' + momentsHeaderOpacity + ')',
+                            boxShadow: momentsHeaderOpacity > 0.8 ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                            color: momentsHeaderOpacity > 0.5 ? '#000' : '#fff',
+                            textShadow: momentsHeaderOpacity > 0.5 ? 'none' : '0 2px 4px rgba(0,0,0,0.6)',
+                            filter: momentsHeaderOpacity > 0.5 ? 'none' : 'drop-shadow(0 1px 2px rgba(0, 0, 0, 0.7))'
+                         }"
+                         style="position: absolute; top: 0; left: 0; width: 100%; padding: calc(26px + env(safe-area-inset-top)) 15px 10px 15px; display: flex; justify-content: space-between; align-items: center; z-index: 10; box-sizing: border-box; transition: background-color 0.3s, color 0.3s, box-shadow 0.3s, filter 0.3s; pointer-events: auto;">
+                        
+                        <div @click.stop="activeTab = 'msg'" style="display: flex; align-items: center; cursor: pointer;">
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
+                            <span style="font-size: 16px; font-weight: 500; margin-left: 2px;">消息</span>
+                        </div>
+                        <div style="cursor: pointer; display: flex; align-items: center; margin-right: 10px;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        </div>
+                    </div>
+
+                    <!-- 滚动容器 -->
+                    <div style="height: 100%; overflow-y: auto; background: #fff;" @scroll="handleMomentsScroll">
+                        <!-- 动态页顶部背景图区域 -->
+                        <div style="width: 100%; height: 25vh; position: relative; background-color: #888; background-size: cover; background-position: center;"
+                             :style="{ backgroundImage: qqData.momentsBackground ? 'url(' + qqData.momentsBackground + ')' : 'none' }"
+                             @click="triggerMomentsBgUpload">
+                            
+                            <!-- 底部渐变层 -->
+                            <div style="position: absolute; bottom: 0; left: 0; width: 100%; height: 50px; background: linear-gradient(to bottom, transparent, #fff); pointer-events: none;"></div>
+
+                            <!-- 左下角圆形头像 -->
+                            <div style="position: absolute; bottom: -25px; left: 15px; display: flex; align-items: flex-end; z-index: 5;">
+                                 <div @click.stop="triggerSelfAvatarUpload" 
+                                      style="width: 80px; height: 80px; border-radius: 50%; background-color: #eee; border: 3px solid #fff; background-size: cover; background-position: center; box-shadow: 0 2px 6px rgba(0,0,0,0.15);"
+                                      :style="{ backgroundImage: qqData.selfAvatar ? 'url(' + qqData.selfAvatar + ')' : 'none' }">
+                                 </div>
+                                 <div style="margin-left: 15px; margin-bottom: 15px; display: flex; flex-direction: column;">
+                                    <div @click.stop="editSelfName" style="font-size: 18px; font-weight: bold; color: white; text-shadow: 0 1px 2px rgba(0,0,0,0.6); margin-bottom: 2px; cursor: pointer;">{{ qqData.selfName || '我' }}</div>
+                                    <div @click.stop="editVisitorCount" style="font-size: 15px; color: white; text-shadow: 0 1px 2px rgb(0, 0, 0); cursor: pointer;">访客数量 {{ qqData.visitorCount || 0 }}</div>
+                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- 下方内容区域 -->
+                        <div style="padding-top: 50px; background: #fff;">
+                        <!-- 新增：功能导航栏 -->
+                        <div style="display: flex; justify-content: space-around; margin-bottom: 20px; padding: 0 10px; border-bottom: 1px solid #f0f0f0; padding-bottom: 20px;">
+                            <div @click="openPublishMoment" style="display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer;">
+                                <div style="width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; color: #333; background: #f5f5f5; border-radius: 8px;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"></path><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path></svg>
+                                </div>
+                                <span style="font-size: 12px; color: #333;">说说</span>
+                            </div>
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 5px; opacity: 0.5;">
+                                <div style="width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; color: #333; background: #f5f5f5; border-radius: 8px;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                                </div>
+                                <span style="font-size: 12px; color: #333;">日志</span>
+                            </div>
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 5px; opacity: 0.5;">
+                                <div style="width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; color: #333; background: #f5f5f5; border-radius: 8px;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                                </div>
+                                <span style="font-size: 12px; color: #333;">留言</span>
+                            </div>
+                            <div style="display: flex; flex-direction: column; align-items: center; gap: 5px; opacity: 0.5;">
+                                <div style="width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; color: #333; background: #f5f5f5; border-radius: 8px;">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>
+                                </div>
+                                <span style="font-size: 12px; color: #333;">更多</span>
+                            </div>
+                        </div>
+                        
+                        <!-- 说说列表 -->
+                        <div v-if="qqData.momentsList && qqData.momentsList.length > 0" style="padding: 0 15px;">
+                            <div v-for="moment in qqData.momentsList" :key="moment.id" style="padding: 15px 0; border-bottom: 1px solid #f0f0f0;">
+                                <div style="display: flex; align-items: flex-start; margin-bottom: 10px;">
+                                    <div :style="{ backgroundImage: qqData.selfAvatar ? 'url(' + qqData.selfAvatar + ')' : 'none' }" style="width: 40px; height: 40px; border-radius: 50%; background-color: #eee; margin-right: 10px; background-size: cover; background-position: center;"></div>
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: bold; color: #586b95;">{{ qqData.selfName || '我' }}</div>
+                                        <div style="font-size: 12px; color: #999;">{{ moment.time }}</div>
+                                    </div>
+                                    <!-- 新增：说说操作菜单 -->
+                                    <div style="position: relative;">
+                                        <div @click.stop="toggleMomentMenu(moment.id)" style="cursor: pointer; padding: 5px; color: #888;">
+                                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>
+                                        </div>
+                                        <div v-if="activeMomentMenu === moment.id" style="position: absolute; right: 0; top: 30px; background: white; border-radius: 6px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); z-index: 10; overflow: hidden;">
+                                            <div @click="deleteMoment(moment.id)" style="padding: 8px 15px; font-size: 14px; color: #ff3b30; cursor: pointer; white-space: nowrap;">删除</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div v-if="moment.content" style="margin-bottom: 8px; white-space: pre-wrap; line-height: 1.6;">{{ moment.content }}</div>
+                                <div v-if="moment.images && moment.images.length > 0" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 8px;">
+                                    <div v-for="(img, idx) in moment.images" :key="idx" style="padding-top: 100%; position: relative; background-color: #eee; border-radius: 4px; overflow: hidden;">
+                                        <img :src="img" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;">
+                                    </div>
+                                </div>
+                                <div v-if="moment.location" style="font-size: 12px; color: #586b95; margin-bottom: 5px;">📍 {{ moment.location }}</div>
+                                <div v-if="moment.mentions && moment.mentions.length > 0" style="font-size: 13px; color: #586b95; background: #f0f2f5; padding: 5px 8px; border-radius: 4px; margin-bottom: 10px;">
+                                    @ {{ moment.mentions.map(m => m.name).join(', ') }}
+                                </div>
+
+                                <!-- 新增：点赞和转发按钮 -->
+                                <div style="display: flex; justify-content: flex-end; align-items: center; gap: 15px; margin-bottom: 10px;">
+                                    <div @click="toggleLike(moment)" style="display: flex; align-items: center; gap: 4px; cursor: pointer; color: #586b95;">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                                        </svg>
+                                        <span>{{ moment.likes.length > 0 ? moment.likes.length : '点赞' }}</span>
+                                    </div>
+                                    <div @click="forwardMoment(moment)" style="display: flex; align-items: center; gap: 4px; cursor: pointer; color: #586b95;">
+                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                                        <span>转发</span>
+                                    </div>
+                                </div>
+
+                                <!-- 新增：点赞和评论区 -->
+                                <div style="background: #f7f7f7; border-radius: 4px; padding: 8px 12px;">
+                                    <!-- 点赞列表 -->
+                                    <div v-if="moment.likes.length > 0" style="padding-bottom: 8px; border-bottom: 1px solid #eee; margin-bottom: 8px; font-size: 14px; color: #586b95; display: flex; align-items: center; flex-wrap: wrap;">
+                                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; transform: translateY(1px); flex-shrink: 0;">
+                                            <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
+                                        </svg>
+                                        <span>{{ moment.likes.join(', ') }}</span>
+                                    </div>
+                                    <!-- 评论列表 -->
+                                    <div v-if="moment.comments.length > 0" style="display: flex; flex-direction: column; gap: 5px; font-size: 14px; margin-bottom: 10px;">
+                                        <div v-for="comment in moment.comments" :key="comment.id">
+                                            <strong style="color: #586b95;">{{ qqData.selfName || '我' }}: </strong>
+                                            <span>{{ comment.content }}</span>
+                                        </div>
+                                    </div>
+                                    <!-- 评论输入框 -->
+                                    <div style="display: flex; gap: 8px;">
+                                        <input type="text" v-model="moment.tempComment" @keyup.enter="submitComment(moment)" placeholder="发表评论..." style="flex: 1; border: 1px solid #ddd; border-radius: 15px; padding: 6px 12px; font-size: 14px; background: #fff;">
+                                        <button @click="submitComment(moment)" :disabled="!moment.tempComment.trim()" :style="{ border: 'none', background: moment.tempComment.trim() ? 'var(--accent-color)' : '#dcdcdc', color: 'white', borderRadius: '15px', padding: '6px 12px', fontSize: '14px' }">发送</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                         <div v-else style="text-align: center; color: #999; font-size: 14px; margin-top: 40px;">
+                             还没有动态，点击上方“说说”发布第一条吧！
+                         </div>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="qq-tab-bar" style="height: 55px; border-top: 1px solid #ddd; display: flex; background: #f9f9f9;">
@@ -1487,11 +1971,11 @@ const deleteHeartEntry = (chat, idx) => {
 
         <!-- 聊天详情页 -->
         <div v-else class="chat-container" style="height:100%; position:relative;">
-            <div class="app-header" style="height: 78px; padding-top: 10px; align-items: flex-end; padding-bottom: 10px; position: relative; justify-content: center;">
-                <div class="app-header-left" @click="qqData.currentChatId = null" style="position: absolute; left: 10px; bottom: 26px; z-index: 10; display:flex; align-items:center;">
+            <div class="app-header" style="height: calc(60px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); margin-top: 0; align-items: center; position: relative; justify-content: center;">
+                <div class="app-header-left" @click="qqData.currentChatId = null" style="position: absolute; left: 10px; z-index: 10; display:flex; align-items:center;">
                     <span style="font-size: 24px; margin-right: 2px; margin-bottom: 2px;">‹</span> <span style="font-size: 16px;">消息</span>
                 </div>
-                <div class="app-header-title" style="margin-bottom: 2px; width: 60%; text-align: center; position: absolute; bottom: 16px; left: 0; right: 0; margin-left: auto; margin-right: auto; display: flex; flex-direction: column; align-items: center; pointer-events: none;">
+                <div class="app-header-title" style="width: 60%; text-align: center; position: absolute; left: 0; right: 0; margin-left: auto; margin-right: auto; display: flex; flex-direction: column; align-items: center; pointer-events: none;">
                     <span v-if="qqData.isSending && qqData.sendingChatId === getCurrentChat().id" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.2; color: #888; font-style: italic;">
                         对方正在输入中...
                     </span>
@@ -1513,14 +1997,14 @@ const deleteHeartEntry = (chat, idx) => {
                     </div>
                 </div>
                 <!-- ✅ 新增：粉色愛心按鈕（齒輪左側） -->
-                <div style="position: absolute; right: 54px; bottom: 23px; z-index: 11;">
+                <div style="position: absolute; right: 54px; z-index: 11;">
                     <button @click.stop="openHeartModal" title="心聲" style="width:28px; height:28px; border-radius:50%; border:none; background: linear-gradient(135deg,#ff9ac2,#ff6fa3); display:flex; align-items:center; justify-content:center; box-shadow:0 1px 6px rgba(255,102,170,0.18);">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12.1 21.35l-1.1-1.02C5.14 15.24 2 12.39 2 8.99 2 6.42 4.24 4.5 6.76 4.5c1.54 0 3.04.99 3.74 2.44.7-1.45 2.2-2.44 3.74-2.44C19.76 4.5 22 6.42 22 8.99c0 3.4-3.14 6.25-8.99 11.34l-1.01 1.02z"/>
                         </svg>
                     </button>
                 </div>
-                <div class="app-header-close" @click="openQQSettings" style="font-size: 25px; position: absolute; right: 15px; bottom: 21px; z-index: 10;">
+                <div class="app-header-close" @click="openQQSettings" style="font-size: 25px; position: absolute; right: 15px; z-index: 10;">
                     ⚙️
                     <div v-if="showSummaryAlert" style="position: absolute; top: -2px; right: -2px; width: 8px; height: 8px; background: red; border-radius: 50%; border: 1px solid white;"></div>
                 </div>
@@ -1533,7 +2017,7 @@ const deleteHeartEntry = (chat, idx) => {
                 <template v-for="(msg, index) in getCurrentChat().messages" :key="index">
                     <!-- 时间气泡 -->
                     <div v-if="msg.showTime" style="width: 100%; text-align: center; margin: 20px 0 10px;">
-                        <span style="background: #dcdcdc; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px;">{{ msg.timeDisplay }}</span>
+                        <span style="background: #cacaca; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px;">{{ msg.timeDisplay }}</span>
                     </div>
 
                     <div class="chat-row"
@@ -1571,9 +2055,9 @@ const deleteHeartEntry = (chat, idx) => {
 
                     <!-- 语音消息 (展开式) -->
                     <div v-else-if="msg.type === 'voice'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
                         <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                             <div class="chat-bubble"
                                  @touchstart="handleMsgTouchStart($event, index)"
                                  @touchend="handleMsgTouchEnd"
@@ -1612,9 +2096,9 @@ const deleteHeartEntry = (chat, idx) => {
 
                     <!-- 红包 (Ins风) -->
                     <div v-else-if="msg.type === 'redpacket'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
                         <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                             <div class="chat-bubble"
                                  @touchstart="handleMsgTouchStart($event, index)"
                                  @touchend="handleMsgTouchEnd"
@@ -1632,9 +2116,9 @@ const deleteHeartEntry = (chat, idx) => {
 
                     <!-- 转账 (Ins风) -->
                     <div v-else-if="msg.type === 'transfer'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
                         <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                             <div class="chat-bubble"
                                  @touchstart="handleMsgTouchStart($event, index)"
                                  @touchend="handleMsgTouchEnd"
@@ -1657,9 +2141,9 @@ const deleteHeartEntry = (chat, idx) => {
 
                     <!-- 表情包 (纯图片，无背景) -->
                     <div v-else-if="msg.type === 'sticker'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
                         <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                             <div class="chat-bubble"
                                  @touchstart="handleMsgTouchStart($event, index)"
                                  @touchend="handleMsgTouchEnd"
@@ -1673,9 +2157,9 @@ const deleteHeartEntry = (chat, idx) => {
 
                     <!-- 图片 (描述卡片) -->
                     <div v-else-if="msg.type === 'image'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
                         <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                             <div class="chat-bubble"
                                  @touchstart="handleMsgTouchStart($event, index)"
                                  @touchend="handleMsgTouchEnd"
@@ -1703,9 +2187,9 @@ const deleteHeartEntry = (chat, idx) => {
 
                     <!-- 位置 -->
                     <div v-else-if="msg.type === 'location'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
                         <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                             <div class="chat-bubble"
                                  @touchstart="handleMsgTouchStart($event, index)"
                                  @touchend="handleMsgTouchEnd"
@@ -1729,37 +2213,40 @@ const deleteHeartEntry = (chat, idx) => {
                     </div>
 
                     <!-- 链接消息 -->
-                    <div v-else-if="msg.type === 'link'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="max-width: 70%;">
-                         <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', flexShrink: 0, marginRight: '10px' }"></div>
-                         <div class="chat-bubble"
-                             @touchstart="handleMsgTouchStart($event, index)"
-                             @touchend="handleMsgTouchEnd"
-                             @contextmenu.prevent="showContextMenu($event, index)"
-                             @click.stop="openLinkViewer(msg)"
-                             style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; overflow: hidden; background: white; border: 1px solid #ddd; width: 230px; cursor: pointer;"
-                         >
-                            <div style="padding: 12px; display: flex; align-items: center;">
-                                <div style="flex: 1; overflow: hidden;">
-                                    <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }" style="font-weight: bold; color: #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                        {{ msg.linkData.title }}
+                    <div v-else-if="msg.type === 'link'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
+                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
+                            <div class="chat-bubble"
+                                @touchstart="handleMsgTouchStart($event, index)"
+                                @touchend="handleMsgTouchEnd"
+                                @contextmenu.prevent="showContextMenu($event, index)"
+                                @click.stop="openLinkViewer(msg)"
+                                style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; overflow: hidden; background: white; border: 1px solid #ddd; width: 230px; cursor: pointer;"
+                            >
+                                <div style="padding: 12px; display: flex; align-items: center;">
+                                    <div style="flex: 1; overflow: hidden;">
+                                        <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }" style="font-weight: bold; color: #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                            {{ msg.linkData.title }}
+                                        </div>
+                                        <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 12 / 16) + 'px' }" style="color: #888; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                            {{ msg.linkData.content }}
+                                        </div>
                                     </div>
-                                    <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 12 / 16) + 'px' }" style="color: #888; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                        {{ msg.linkData.content }}
+                                    <div style="margin-left: 12px; font-size: 32px;">
+                                        🔗
                                     </div>
                                 </div>
-                                <div style="margin-left: 12px; font-size: 32px;">
-                                    🔗
+                                <div v-if="msg.linkData.source" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px' }" style="padding: 5px 12px; border-top: 1px solid #eee; color: #aaa;">
+                                    来源: {{ msg.linkData.source }}
                                 </div>
                             </div>
-                            <div v-if="msg.linkData.source" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px' }" style="padding: 5px 12px; border-top: 1px solid #eee; color: #aaa;">
-                                来源: {{ msg.linkData.source }}
-                            </div>
-                         </div>
+                        </div>
                     </div>
 
                     <!-- 转发消息 -->
                     <div v-else-if="msg.type === 'forwarded'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="max-width: 70%;">
-                         <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + msg.avatar + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', flexShrink: 0, marginRight: '10px' }"></div>
+                         <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + msg.avatar + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', flexShrink: 0, marginRight: '10px' }"></div>
                          <div class="chat-bubble"
                              @touchstart="handleMsgTouchStart($event, index)"
                              @touchend="handleMsgTouchEnd"
@@ -1784,9 +2271,9 @@ const deleteHeartEntry = (chat, idx) => {
 
                     <!-- 正常文字 -->
                     <div v-else class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
                         <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap;">{{ msg.time }}</div>
+                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                             <!-- ✅ 添加 message-bubble 类和 content 子元素以支持CSS自定义 -->
                             <div :class="['message-bubble', msg.role === 'user' ? 'user' : 'ai']">
                                 <div class="content"
@@ -1879,7 +2366,7 @@ const deleteHeartEntry = (chat, idx) => {
                 </div>
                 <div class="chat-input-bar" style="align-items: flex-end; padding-top: 8px; padding-bottom: 8px;">
                     <textarea ref="chatInputRef" class="chat-input" v-model="qqData.inputMsg" @keypress.enter="sendUserMessage" placeholder="发消息..." :disabled="qqData.isSending" rows="1" style="resize: none; min-height: 36px; max-height: 120px; padding: 8px 10px; border-radius: 18px; line-height: 20px; overflow-y: auto;"></textarea>
-                    <button class="chat-send-btn" @click="sendUserMessage(null)" :disabled="!qqData.inputMsg.trim()" style="height: 36px; margin-bottom: 0;">发送</button>
+                    <button class="chat-send-btn" @click="sendUserMessage(null)" :disabled="!qqData.inputMsg.trim()" :style="{ height: '36px', marginBottom: '0', background: qqData.inputMsg.trim() ? 'var(--accent-color)' : null, color: qqData.inputMsg.trim() ? 'white' : null }">发送</button>
                 </div>
             </div>
         </div>
@@ -1896,9 +2383,10 @@ const deleteHeartEntry = (chat, idx) => {
                 </div>
                 <div style="margin-top:14px; display:flex; flex-direction:column; gap:12px;">
                     <template v-if="getCurrentChat().heartThoughts && getCurrentChat().heartThoughts.length > 0">
-                        <div v-for="(key, idx) in ['clothing','behavior','thought','evil']" :key="key" style="background:#fff7fb; border:1px solid #ffe6f2; padding:14px; border-rdius:10px;">
-                            <div style="font-size:13px; color:#ff3b7a; font-weight:700; margin-bottom:6px;">
-                                {{ key === 'clothing' ? '衣着' : (key === 'behavior' ? '行为' : (key === 'thought' ? '心声' : '坏心思')) }}
+                        <div v-for="(key, idx) in ['clothing','behavior','thought','evil']" :key="key" 
+                             :style="{ background: heartStyles[key].bg, border: '1px solid ' + heartStyles[key].border, padding:'14px', borderRadius:'10px' }">
+                            <div :style="{ fontSize:'13px', color: heartStyles[key].title, fontWeight:'700', marginBottom:'6px' }">
+                                {{ heartStyles[key].label }}
                             </div>
                             <div style="font-size:15px; color:#333; line-height:1.7; white-space:pre-wrap;">
                                 {{ (getCurrentChat().heartThoughts[currentHeartIndex] && getCurrentChat().heartThoughts[currentHeartIndex].data && getCurrentChat().heartThoughts[currentHeartIndex].data[key]) || '暂无内容' }}
@@ -1978,8 +2466,8 @@ const deleteHeartEntry = (chat, idx) => {
                     <textarea class="qq-textarea" v-model="linkForm.content" placeholder="必填，粘贴或输入内容" style="height: 120px;"></textarea>
                 </div>
                 <div style="display:flex; gap:10px; margin-top: 15px;">
-                     <button class="modal-btn cancel" @click="isLocationModalOpen = false">取消</button>
-                     <button class="modal-btn" @click="sendLocation" style="color: var(--accent-color);">发送</button>
+                     <button class="modal-btn cancel" @click="isLinkModalOpen = false">取消</button>
+                     <button class="modal-btn" @click="sendLink" style="color: var(--accent-color);">发送</button>
                 </div>
             </div>
         </div>
@@ -2014,7 +2502,7 @@ const deleteHeartEntry = (chat, idx) => {
         </div>
 
         <!-- 聊天设置 -->
-        <div class="modal-overlay" v-if="isQQSettingsOpen" @click.self="isQQSettingsOpen = false">
+        <div class="modal-overlay center-popup" v-if="isQQSettingsOpen" @click.self="isQQSettingsOpen = false">
              <div class="modal-content" style="max-height: 85vh; display: flex; flex-direction: column; padding: 0; overflow: hidden;">
                 <div style="display: flex; justify-content: space-between; align-items: center; padding: 20px 20px 15px; background: white; border-bottom: 1px solid #eee; flex-shrink: 0;">
                     <div class="modal-title" style="margin-bottom: 0;">聊天设置</div>
@@ -2022,8 +2510,16 @@ const deleteHeartEntry = (chat, idx) => {
                 </div>
                 <div style="flex: 1; overflow-y: auto; padding: 20px;">
                 <div style="display:flex; justify-content: space-around; width: 100%; margin-bottom: 10px;">
-                    <div style="display:flex; flex-direction:column; align-items:center;" @click="triggerAvatarUpload('ai')"><div class="qq-setting-avatar" :style="{ backgroundImage: 'url(' + tempQQSettings.avatar + ')' }"></div><span style="font-size:12px; color:#666;">对方头像</span></div>
-                    <div style="display:flex; flex-direction:column; align-items:center;" @click="triggerAvatarUpload('user')"><div class="qq-setting-avatar" :style="{ backgroundImage: 'url(' + tempQQSettings.userAvatar + ')' }"></div><span style="font-size:12px; color:#666;">我的头像</span></div>
+                    <div style="display:flex; flex-direction:column; align-items:center;">
+                        <div class="qq-setting-avatar" :class="tempQQSettings.aiAvatarFrame" :style="{ backgroundImage: 'url(' + tempQQSettings.avatar + ')' }" @click="triggerAvatarUpload('ai')"></div>
+                        <span style="font-size:12px; color:#666;">对方头像</span>
+                        <button @click="openFrameModal('ai')" style="margin-top:5px; font-size:12px; border:1px solid #ddd; background:white; padding:2px 8px; border-radius:10px; color:#666;">头像框</button>
+                    </div>
+                    <div style="display:flex; flex-direction:column; align-items:center;">
+                        <div class="qq-setting-avatar" :class="tempQQSettings.userAvatarFrame" :style="{ backgroundImage: 'url(' + tempQQSettings.userAvatar + ')' }" @click="triggerAvatarUpload('user')"></div>
+                        <span style="font-size:12px; color:#666;">我的头像</span>
+                        <button @click="openFrameModal('user')" style="margin-top:5px; font-size:12px; border:1px solid #ddd; background:white; padding:2px 8px; border-radius:10px; color:#666;">头像框</button>
+                    </div>
                 </div>
                 <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">本名</span><input type="text" class="modal-input" v-model="tempQQSettings.name" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></div>
                 <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">备注名</span><input type="text" class="modal-input" v-model="tempQQSettings.remark" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></div>
@@ -2075,9 +2571,20 @@ const deleteHeartEntry = (chat, idx) => {
                     </div>
                     <div v-if="tempQQSettings.timeAware" style="margin-bottom:8px;">
                         <div style="font-size:12px; color:#666; margin-bottom:6px;">可自定义时间（留空使用当前本地时间）</div>
-                        <input type="datetime-local" v-model="tempQQSettings.timeOverride" style="width:100%; padding:8px; border:1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow); border-radius:6px;" />
+                        <input type="datetime-local" v-model="tempQQSettings.timeOverride" style="display:block; width:100%; height:40px; margin:0; padding:8px; border:1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow); border-radius:6px; box-sizing: border-box; -webkit-appearance: none; background: #fff; font-size: 14px;" />
                     </div>
                 </div>
+                <!-- NPC库入口 -->
+                <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <span style="font-weight:bold; font-size:15px;">NPC库</span>
+                    </div>
+                    <button class="modal-btn" style="width:100%; font-size:13px; background:#f0f0f0; color:#333; border:1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);" 
+                            @click="openNpcManager">
+                        管理 NPC 库 ({{ tempQQSettings.npcList ? tempQQSettings.npcList.length : 0 }})
+                    </button>
+                </div>
+
                 <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                         <span style="font-weight:bold; font-size:15px;">表情包库配置</span>
@@ -2226,7 +2733,7 @@ const deleteHeartEntry = (chat, idx) => {
         </div>
         
         <!-- AI 表情包管理 Modal -->
-        <div class="modal-overlay" v-if="isStickerSettingsOpen" style="z-index: 2150;" @click.self="isStickerSettingsOpen = false">
+        <div class="modal-overlay center-popup" v-if="isStickerSettingsOpen" style="z-index: 2150;" @click.self="isStickerSettingsOpen = false">
              <div class="modal-content" style="max-height: 80vh; overflow-y: auto; display:flex; flex-direction:column;">
                 <div class="modal-title">AI 表情包配置</div>
                 <div style="display:flex; margin-bottom:15px; background:#eee; padding:2px; border-radius:8px;">
@@ -2270,7 +2777,7 @@ const deleteHeartEntry = (chat, idx) => {
         </div>
 
         <!-- 用户表情包选择器 -->
-        <div v-if="isUserStickerPickerOpen" class="modal-overlay" style="z-index: 2500;" @click.self="isUserStickerPickerOpen = false">
+        <div v-if="isUserStickerPickerOpen" class="modal-overlay center-popup" style="z-index: 2500;" @click.self="isUserStickerPickerOpen = false">
             <div class="modal-content" style="max-height: 70vh; display:flex; flex-direction:column; padding:0;">
                 <div style="padding:15px; border-bottom:1px solid #eee; display:flex; justify-content:space-between; align-items:center;">
                     <span style="font-weight:bold;">我的表情包库</span>
@@ -2308,7 +2815,7 @@ const deleteHeartEntry = (chat, idx) => {
         </div>
 
         <!-- 记忆管理 Modal -->
-        <div class="modal-overlay" v-if="isSummaryEditOpen" style="z-index: 2100;" @click.self="isSummaryEditOpen = false">
+        <div class="modal-overlay center-popup" v-if="isSummaryEditOpen" style="z-index: 2100;" @click.self="isSummaryEditOpen = false">
             <div class="modal-content" style="height: 85vh; max-height: 85vh; display: flex; flex-direction: column;">
                 <div class="modal-title" style="flex-shrink: 0;">管理长期记忆碎片</div>
                 <div style="flex: 1; overflow-y: auto; margin-bottom: 10px;">
@@ -2434,8 +2941,144 @@ const deleteHeartEntry = (chat, idx) => {
             </div>
         </div>
 
+        <!-- 头像框选择 Modal -->
+        <div class="modal-overlay" v-if="isFrameModalOpen" @click.self="isFrameModalOpen = false" style="z-index: 2900;">
+            <div class="modal-content">
+                <div class="modal-title">选择头像框</div>
+                <div class="frame-grid">
+                    <div class="frame-option-container" @click="setFrame('')"><div class="frame-preview frame-none"></div><div class="frame-label">无</div></div>
+                    <div class="frame-option-container" @click="addCustomFrame"><div class="frame-preview frame-add">+</div><div class="frame-label">自定义</div></div>
+                    <!-- 预设头像框 -->
+                    <div class="frame-option-container" v-for="(frameUrl, index) in presetFrames" :key="'preset-' + index" @click="setFrame('preset-frame-' + index)">
+                        <div class="frame-preview" :class="'preset-frame-' + index" :style="{ backgroundImage: 'url(' + frameUrl + ')', backgroundSize: 'cover', backgroundPosition: 'center' }"></div>
+                        <div class="frame-label">预设{{ index + 1 }}</div>
+                    </div>
+                    <!-- 自定义头像框 -->
+                    <div class="frame-option-container" v-for="(frameUrl, index) in customFrames" :key="'custom-' + index">
+                        <div class="frame-preview" :class="'custom-frame-' + index" :style="{ backgroundImage: 'url(' + frameUrl + ')', backgroundSize: 'cover', backgroundPosition: 'center' }" @click="setFrame('custom-frame-' + index)"></div>
+                        <div class="frame-label">自定义{{ index + 1 }}</div>
+                        <button class="delete-frame-btn" @click.stop="deleteCustomFrame(index)" title="删除此头像框">×</button>
+                    </div>
+                </div>
+                <button class="modal-btn cancel" @click="isFrameModalOpen = false">返回</button>
+            </div>
+        </div>
+
+        <!-- NPC 管理 Modal -->
+        <div class="modal-overlay center-popup" v-if="isNpcManagerOpen" style="z-index: 2200;" @click.self="isNpcManagerOpen = false">
+            <div class="modal-content" style="height: 600px; max-height: 85vh; display: flex; flex-direction: column;">
+                <div class="modal-title" style="margin-bottom: 10px;">NPC库</div>
+                
+                <!-- Tab 切换 -->
+                <div style="display:flex; margin-bottom:15px; background:#eee; padding:2px; border-radius:8px; flex-shrink: 0;">
+                    <div @click="npcManagerTab = 'list'" 
+                         :style="{ background: npcManagerTab === 'list' ? '#fff' : 'transparent', fontWeight: npcManagerTab === 'list' ? 'bold' : 'normal' }"
+                         style="flex:1; text-align:center; padding:8px; border-radius:6px; font-size:14px; transition:0.2s; cursor:pointer;">NPC 列表</div>
+                    <div @click="openNpcEdit(-1)" 
+                         :style="{ background: npcManagerTab === 'add' ? '#fff' : 'transparent', fontWeight: npcManagerTab === 'add' ? 'bold' : 'normal' }"
+                         style="flex:1; text-align:center; padding:8px; border-radius:6px; font-size:14px; transition:0.2s; cursor:pointer;">{{ editingNpcIndex === -1 ? '添加 NPC' : '编辑 NPC' }}</div>
+                </div>
+
+                <!-- 列表视图 -->
+                <div v-if="npcManagerTab === 'list'" style="flex: 1; overflow-y: auto;">
+                    <div v-if="!tempQQSettings.npcList || tempQQSettings.npcList.length === 0" style="text-align: center; color: #999; padding: 20px; font-size: 13px;">
+                        暂无 NPC，请点击“添加 NPC”
+                    </div>
+                    <div v-else>
+                        <div v-for="(npc, idx) in tempQQSettings.npcList" :key="idx" 
+                             @click="openNpcEdit(idx)"
+                             style="background: #f9f9f9; padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
+                            <div style="flex: 1; min-width: 0; margin-right: 10px;">
+                                <div style="font-weight: bold; font-size: 15px; color: #333;">{{ npc.name }}</div>
+                                <div style="font-size: 12px; color: #888; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                    {{ npc.relation || '暂无关系描述' }}
+                                </div>
+                            </div>
+                            <button @click.stop="deleteNpc(idx)" style="background: none; border: none; color: #ff3b30; font-size: 12px; padding: 5px; flex-shrink: 0;">删除</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 编辑视图 -->
+                <div v-else style="flex: 1; overflow-y: auto;">
+                    <div class="input-row">
+                        <span class="input-label">名字</span>
+                        <input type="text" class="modal-input" v-model="tempNpcData.name" placeholder="NPC 名字">
+                    </div>
+                    
+                    <div style="margin-top: 10px;">
+                        <span class="input-label" style="display: block; margin-bottom: 5px;">设定</span>
+                        <textarea class="qq-textarea" v-model="tempNpcData.setting" placeholder="NPC 的详细设定..." style="height: 100px;"></textarea>
+                    </div>
+                    
+                    <div style="margin-top: 10px;">
+                        <span class="input-label" style="display: block; margin-bottom: 5px;">与Char的关系</span>
+                        <textarea class="qq-textarea" v-model="tempNpcData.relation" placeholder="与当前角色的关系..." style="height: 60px;"></textarea>
+                    </div>
+
+                    <div style="margin-top: 20px;">
+                        <button class="modal-btn" @click="saveNpc" style="color: var(--accent-color);">保存</button>
+                    </div>
+                </div>
+                
+                <button class="modal-btn" @click="isNpcManagerOpen = false" style="margin-top: 15px; flex-shrink: 0; background: #f5f5f5; color: #666; padding: 12px;">关闭</button>
+            </div>
+        </div>
+
         <input type="file" ref="fileInput" hidden accept="image/*" @change="handleFileChange">
         <input type="file" ref="imgMsgInput" hidden accept="image/*" @change="handleImageMsgChange">
+        <input type="file" ref="momentImageInput" hidden multiple accept="image/*" @change="handleMomentImageChange">
+
+        <!-- 说说发布窗口 -->
+        <div v-if="isPublishMomentOpen" class="modal-overlay center-popup" style="z-index: 3000;" @click.self="isPublishMomentOpen = false">
+            <div class="modal-content" style="width: 90%; max-width: 500px; height: 80vh; display: flex; flex-direction: column;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-shrink: 0;">
+                    <button @click="isPublishMomentOpen = false" style="border:none; background:none; font-size: 16px;">取消</button>
+                    <div style="font-weight: bold; font-size: 17px;">发说说</div>
+                    <button @click="publishMoment" style="border:none; background: #007aff; color: white; padding: 6px 15px; border-radius: 15px; font-size: 15px;">发布</button>
+                </div>
+                <div style="flex: 1; overflow-y: auto; padding-bottom: 10px;">
+                    <textarea v-model="momentForm.content" placeholder="分享新鲜事..." style="width: 100%; height: 120px; border: none; resize: none; font-size: 16px; padding: 5px;"></textarea>
+                    
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+                        <div v-for="(img, index) in momentForm.images" :key="index" style="padding-top: 100%; position: relative; border-radius: 8px; overflow: hidden;">
+                            <img :src="img" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;">
+                            <button @click="removeMomentImage(index)" style="position: absolute; top: 2px; right: 2px; width: 18px; height: 18px; border-radius: 50%; background: rgba(0,0,0,0.6); color: white; border: none; font-size: 12px; line-height: 18px; padding: 0;">×</button>
+                        </div>
+                        <div v-if="momentForm.images.length < 9" @click="triggerMomentImageUpload" style="aspect-ratio: 1 / 1; border: 2px dashed #ccc; border-radius: 8px; display: flex; justify-content: center; align-items: center; cursor: pointer;">
+                            <span style="font-size: 24px; color: #ccc;">+</span>
+                        </div>
+                    </div>
+                </div>
+                <div style="border-top: 1px solid #eee; padding-top: 10px; flex-shrink: 0;">
+                    <div @click="openAtUserModal" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; cursor: pointer;">
+                        <span style="font-size: 18px; margin-right: 10px;">@</span>
+                        <span>提醒谁看</span>
+                        <span style="margin-left: auto; color: #888; font-size: 14px;">{{ momentForm.mentions.length > 0 ? momentForm.mentions.map(m => m.name).join(', ') : '' }}</span>
+                    </div>
+                    <div @click="addMomentLocation" style="padding: 10px; display: flex; align-items: center; cursor: pointer;">
+                        <span style="font-size: 18px; margin-right: 10px; color: #555;">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>
+                        </span>
+                        <span>所在位置</span>
+                        <span style="margin-left: auto; color: #888; font-size: 14px;">{{ momentForm.location || '' }}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- @好友选择窗口 -->
+        <div v-if="isAtUserModalOpen" class="modal-overlay center-popup" style="z-index: 3100;" @click.self="isAtUserModalOpen = false">
+            <div class="modal-content" style="max-height: 70vh; overflow-y: auto;">
+                <div class="modal-title">选择要@的好友</div>
+                <div v-for="chat in qqData.chatList" :key="chat.id" @click="toggleMention(chat)" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; cursor: pointer;">
+                     <div class="qq-avatar" :style="{ backgroundImage: 'url(' + chat.avatar + ')' }" style="width: 30px; height: 30px; margin-right: 10px;"></div>
+                     <span>{{ chat.remark || chat.name }}</span>
+                     <input type="checkbox" :checked="momentForm.mentions.some(m => m.id === chat.id)" style="margin-left: auto; pointer-events: none;">
+                </div>
+                <button class="modal-btn" @click="isAtUserModalOpen = false" style="margin-top: 10px;">完成</button>
+            </div>
+        </div>
     </div>
     `
 };

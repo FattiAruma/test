@@ -19,6 +19,15 @@ export default {
         
         const currentTheme = ref('pink');
         
+        // 世界书数据
+        const worldbooks = ref([]);
+        const selectedWorldbookIds = ref([]);
+
+        // 监听世界书选择并保存
+        watch(selectedWorldbookIds, async (newVal) => {
+            await localforage.setItem('otome_selected_worldbook_ids', JSON.parse(JSON.stringify(newVal)));
+        }, { deep: true });
+
         // 预设场景
         const defaultScenes = [
             { 
@@ -526,6 +535,20 @@ export default {
 }
 注意：text 中的内容请丰富一些，大约500字左右，详细描写场景、心理活动和对话。options 必须包含 3 个建议的玩家回复选项。`;
 
+            // 注入世界书内容
+            if (selectedWorldbookIds.value && selectedWorldbookIds.value.length > 0) {
+                const selectedBooks = worldbooks.value.filter(b => selectedWorldbookIds.value.includes(b.id));
+                if (selectedBooks.length > 0) {
+                    systemPrompt += `\n\n【世界观/背景设定】\n`;
+                    selectedBooks.forEach((book, index) => {
+                        if (book.content) {
+                            systemPrompt += `[设定${index + 1}: ${book.title}]\n${book.content}\n\n`;
+                        }
+                    });
+                    systemPrompt += `请严格遵循以上世界观设定进行剧情演绎，确保角色行为和环境描述符合该世界观。`;
+                }
+            }
+
             let userPrompt = '';
             
             if (currentMode.value === 'new') {
@@ -567,8 +590,17 @@ export default {
                 
                 // 尝试解析 JSON
                 let content = response.trim();
-                // 去除可能的 markdown 标记
-                content = content.replace(/^```json/, '').replace(/^```/, '').replace(/```$/, '');
+                
+                // 智能提取 JSON 对象：查找第一个 { 和最后一个 }
+                const firstBrace = content.indexOf('{');
+                const lastBrace = content.lastIndexOf('}');
+                
+                if (firstBrace !== -1 && lastBrace !== -1) {
+                    content = content.substring(firstBrace, lastBrace + 1);
+                } else {
+                    // 如果找不到花括号，尝试去除 markdown 标记
+                    content = content.replace(/^```json/, '').replace(/^```/, '').replace(/```$/, '');
+                }
                 
                 let result;
                 try {
@@ -576,8 +608,9 @@ export default {
                 } catch (e) {
                     console.error('JSON Parse Error:', e);
                     // 容错处理：如果不是 JSON，直接作为文本
+                    // 使用原始响应但去除代码块标记，避免显示 JSON 结构字符
                     result = {
-                        text: content,
+                        text: response.replace(/```json/g, '').replace(/```/g, ''),
                         options: ['继续', '微笑', '沉默']
                     };
                 }
@@ -605,6 +638,36 @@ export default {
                 dialogueText.value = '生成失败，请检查 API 设置或网络。';
                 isLoading.value = false;
             }
+        };
+
+        // 重新生成剧情
+        const rerollStory = () => {
+            if (!isGameStarted.value) return;
+
+            // 如果正在请求 API (isLoading=true 且不是在打字)，则提示等待
+            if (isLoading.value && !isTyping.value && dialogueQueue.value.length === 0) {
+                alert('正在生成剧情中，请稍候...');
+                return;
+            }
+            
+            // 停止当前的打字效果
+            if (typingInterval.value) clearInterval(typingInterval.value);
+            isTyping.value = false;
+            dialogueQueue.value = [];
+            
+            // 检查历史记录
+            if (chatHistory.value.length > 0) {
+                const lastMsg = chatHistory.value[chatHistory.value.length - 1];
+                if (lastMsg.role === 'assistant') {
+                    chatHistory.value.pop();
+                }
+            } else {
+                alert('没有可重生成的剧情内容');
+                return;
+            }
+            
+            // 重新生成
+            generateContent();
         };
 
         // 播放下一句
@@ -778,6 +841,28 @@ export default {
                 let storedStories = await localforage.getItem('otome_saved_stories');
                 if (storedStories) savedStories.value = JSON.parse(storedStories);
 
+                // 7. Worldbooks (从 WorldbookApp 的存储中读取)
+                const storedWorldbooks = await localforage.getItem('worldbooks');
+                if (storedWorldbooks) {
+                    worldbooks.value = JSON.parse(storedWorldbooks);
+                } else {
+                    // 尝试从 localStorage 读取（兼容旧数据）
+                    const localWB = localStorage.getItem('worldbooks');
+                    if (localWB) worldbooks.value = JSON.parse(localWB);
+                }
+
+                // 8. Selected Worldbook
+                const storedSelectedBookIds = await localforage.getItem('otome_selected_worldbook_ids');
+                if (storedSelectedBookIds && Array.isArray(storedSelectedBookIds)) {
+                    selectedWorldbookIds.value = storedSelectedBookIds;
+                } else {
+                    // 尝试迁移旧的单选数据
+                    const storedSelectedBookId = await localforage.getItem('otome_selected_worldbook');
+                    if (storedSelectedBookId) {
+                        selectedWorldbookIds.value = [storedSelectedBookId];
+                    }
+                }
+
                 console.log("✅ [Otomegame] 数据加载/迁移完成");
 
             } catch (e) {
@@ -819,6 +904,7 @@ export default {
             isTyping,
             dialogueQueue,
             isGameStarted,
+            rerollStory,
             openAddSceneModal,
             addScene,
             deleteScene,
@@ -849,7 +935,9 @@ export default {
             applyPreset,
             saveNewPreset,
             updateCurrentPreset,
-            deleteCurrentPreset
+            deleteCurrentPreset,
+            worldbooks,
+            selectedWorldbookIds
         };
     },
     template: `
@@ -966,32 +1054,55 @@ export default {
             </div>
         </div>
         
-        <!-- 主题选择模态框 -->
-        <div v-if="isThemeModalOpen" class="modal-overlay" @click.self="isThemeModalOpen = false">
-            <div class="modal-content otomegame-modal">
-                <div class="modal-title">选择主题</div>
+        <!-- 主题/设置模态框 -->
+        <div v-if="isThemeModalOpen" class="modal-overlay center-popup" @click.self="isThemeModalOpen = false">
+            <div class="modal-content otomegame-modal" style="width: 360px; height: 75vh; display: flex; flex-direction: column; max-height: 800px;">
+                <div class="modal-title">游戏设置</div>
                 
-                <div class="theme-grid">
-                    <div 
-                        v-for="(theme, key) in themes" 
-                        :key="key"
-                        @click="changeTheme(key)"
-                        class="theme-option"
-                        :class="{ active: currentTheme === key }"
-                    >
-                        <div class="theme-preview" :style="{ background: 'linear-gradient(135deg, ' + theme.primary + ' 0%, ' + theme.secondary + ' 100%)' }">
-                            <div v-if="currentTheme === key" class="theme-check">
-                                <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
-                                    <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
-                                </svg>
+                <div style="flex: 1; overflow-y: auto; padding: 0 5px;">
+                    <!-- 主题选择 -->
+                    <div class="section-title" style="margin: 10px 0; font-size: 16px; font-weight: bold;">界面主题</div>
+                    <div class="theme-grid">
+                        <div 
+                            v-for="(theme, key) in themes" 
+                            :key="key"
+                            @click="changeTheme(key)"
+                            class="theme-option"
+                            :class="{ active: currentTheme === key }"
+                        >
+                            <div class="theme-preview" :style="{ background: 'linear-gradient(135deg, ' + theme.primary + ' 0%, ' + theme.secondary + ' 100%)' }">
+                                <div v-if="currentTheme === key" class="theme-check">
+                                    <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+                                        <path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/>
+                                    </svg>
+                                </div>
                             </div>
+                            <div class="theme-name">{{ theme.name }}</div>
                         </div>
-                        <div class="theme-name">{{ theme.name }}</div>
+                    </div>
+
+                    <!-- 世界书选择 -->
+                    <div class="section-title" style="margin: 25px 0 10px 0; font-size: 16px; font-weight: bold; border-top: 1px solid #eee; padding-top: 15px;">世界书设定</div>
+                    <div class="input-hint" style="margin-bottom: 10px;">选择世界书以在剧情中生效（可多选）</div>
+                    
+                    <div class="worldbook-list" style="max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px; padding: 5px; background: #f9f9f9;">
+                        <div v-if="worldbooks.length === 0" style="padding: 10px; text-align: center; color: #999; font-size: 14px;">暂无世界书</div>
+                        <div v-for="book in worldbooks" :key="book.id" style="padding: 8px; border-bottom: 1px solid #eee; display: flex; align-items: center;">
+                            <input type="checkbox" :id="'wb-' + book.id" :value="book.id" v-model="selectedWorldbookIds" style="margin-right: 10px; width: 16px; height: 16px;">
+                            <label :for="'wb-' + book.id" style="flex: 1; cursor: pointer; font-size: 14px;">{{ book.title }}</label>
+                        </div>
+                    </div>
+                    
+                    <div v-if="selectedWorldbookIds.length > 0" style="margin-top: 15px; font-size: 13px; color: #555; background: #f0f7ff; padding: 12px; border-radius: 8px; border-left: 4px solid #007aff;">
+                        <div style="font-weight: bold; margin-bottom: 4px;">已启用 {{ selectedWorldbookIds.length }} 本世界书</div>
+                        <div style="color: #888; font-size: 12px;">
+                            {{ worldbooks.filter(b => selectedWorldbookIds.includes(b.id)).map(b => b.title).join(', ') }}
+                        </div>
                     </div>
                 </div>
                 
-                <button @click="isThemeModalOpen = false" class="modal-btn confirm" style="margin-top: 20px; width: 100%;">
-                    关闭
+                <button @click="isThemeModalOpen = false" class="modal-btn confirm" style="margin-top: 20px; width: 100%; flex: none;">
+                    完成
                 </button>
             </div>
         </div>
@@ -1079,14 +1190,14 @@ export default {
                  }">
                 <img :src="characterForm.image" alt="角色立绘">
             </div>
-            <div v-if="currentMode === 'existing' && (sceneForm.image || (selectedContact && selectedContact.avatar))" class="character-sprite"
+            <div v-if="currentMode === 'existing' && sceneForm.image" class="character-sprite"
                  :style="{ 
                      width: sceneForm.imageSize + 'px',
                      maxWidth: 'none',
                      maxHeight: 'none',
                      transform: 'translate(calc(-50% + ' + sceneForm.imagePosition.x + 'px), calc(-50% + ' + sceneForm.imagePosition.y + 'px))'
                  }">
-                <img :src="sceneForm.image || selectedContact.avatar" alt="角色立绘">
+                <img :src="sceneForm.image" alt="角色立绘">
             </div>
             
             <!-- 顶部工具栏 -->
@@ -1097,12 +1208,22 @@ export default {
                     </svg>
                 </button>
                 
-                <button @click="openSettings" class="toolbar-btn">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <circle cx="12" cy="12" r="3"></circle>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
-                    </svg>
-                </button>
+                <div style="display: flex; gap: 10px;">
+                    <button @click="rerollStory" class="toolbar-btn" title="重新生成这段剧情" :style="{ opacity: (isLoading && !isTyping) ? 0.5 : 1 }">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M23 4v6h-6"></path>
+                            <path d="M1 20v-6h6"></path>
+                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                        </svg>
+                    </button>
+
+                    <button @click="openSettings" class="toolbar-btn">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
             
             <!-- 选项区域 -->

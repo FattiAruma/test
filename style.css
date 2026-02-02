@@ -76,10 +76,6 @@ body {
 }
 
 .avatar { width: 76px; height: 76px; border-radius: 50%; background-color: #fff; margin-bottom: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); display: flex; justify-content: center; align-items: center; font-size: 30px; cursor: pointer; background-size: cover; background-position: center; position: relative; z-index: 1; border: none !important; }
-.frame-pink { box-shadow: 0 0 0 4px #ffb7c5; }
-.frame-gradient::after { content: ''; position: absolute; top: -4px; left: -4px; right: -4px; bottom: -4px; background: linear-gradient(to right, #a18cd1 0%, #fbc2eb 100%); border-radius: 50%; z-index: 2; pointer-events: none; padding: 4px; -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0); -webkit-mask-composite: xor; mask-composite: exclude; }
-.frame-stitch::after { content: ''; position: absolute; top: -5px; left: -5px; right: -5px; bottom: -5px; border: 3px dashed #888; border-radius: 50%; z-index: 2; pointer-events: none; }
-.frame-gold { box-shadow: 0 0 0 3px #ffd700, 0 0 10px rgba(255, 215, 0, 0.6); }
 .user-name { font-size: 18px; font-weight: bold; margin-bottom: 5px; cursor: pointer; border-bottom: 1px solid transparent; transition: border-color 0.2s; }
 .user-name:active { opacity: 0.6; }
 .user-bio { font-size: 12px; opacity: 0.8; text-align: center; cursor: pointer; min-height: 14px; min-width: 50px; }
@@ -269,7 +265,7 @@ body {
 .chat-bubble { padding: 10px 14px; border-radius: 18px; font-size: 16px; line-height: 1.4; word-break: break-word; position: relative; max-width: 100%; }
 .chat-message.ai .chat-bubble { background: #fff; color: #000; border-top-left-radius: 4px; }
 .chat-message.me .chat-bubble { background: var(--accent-color); color: #fff; border-top-right-radius: 4px; }
-.chat-avatar-small { width: 36px; height: 36px; border-radius: 50%; background-color: #ccc; background-size: cover; background-position: center; flex-shrink: 0; }
+.chat-avatar-small { width: 36px; height: 36px; border-radius: 50%; background-color: #ccc; background-size: cover; background-position: center; flex-shrink: 0; position: relative; z-index: 1; }
 
 .chat-input-bar { background: #f9f9f9; border-top: 0.5px solid #dcdcdc; padding: 8px 10px; display: flex; align-items: center; gap: 10px; flex-shrink: 0; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
 .chat-input { flex: 1; min-height: 36px; max-height: 100px; padding: 8px 12px; border-radius: 18px; border: none; background: #fff; font-size: 16px; outline: none; resize: none; }
@@ -277,7 +273,7 @@ body {
 .chat-send-btn:disabled { opacity: 0.3; }
 
 /* QQ设置弹窗特定 */
-.qq-setting-avatar { width: 80px; height: 80px; border-radius: 50%; background-color: #eee; margin: 0 auto 10px; background-size: cover; background-position: center; position: relative; }
+.qq-setting-avatar { width: 80px; height: 80px; border-radius: 50%; background-color: #eee; margin: 0 auto 10px; background-size: cover; background-position: center; position: relative; z-index: 1; }
 .qq-setting-avatar::after { content: '修改'; position: absolute; bottom: 0; width: 100%; text-align: center; background: rgba(0,0,0,0.4); color: #fff; font-size: 10px; border-bottom-left-radius: 50px; border-bottom-right-radius: 50px; padding: 2px 0; }
 .qq-textarea { width: 100%; padding: 10px; border: 1px solid #ebedf0; border-radius: 10px; font-size: 14px; background: #f9f9f9; outline: none; min-height: 80px; resize: vertical; margin-top: 5px; }
 
