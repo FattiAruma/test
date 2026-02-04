@@ -6,6 +6,7 @@ export default {
         isOpen: Boolean,
         apiConfig: Object,
         qqData: Object,
+        taobaoData: Object,
         presetFrames: Array,
         customFrames: Array
     },
@@ -399,11 +400,23 @@ export default {
         };
 
         const confirmRedPacket = () => {
-            if (!redPacketForm.amount) { alert("请输入金额"); return; }
+            const amount = parseFloat(redPacketForm.amount);
+            if (isNaN(amount) || amount <= 0) {
+                alert("请输入有效金额");
+                return;
+            }
+
+            if (props.taobaoData.balance < amount) {
+                alert("余额不足！");
+                return;
+            }
+
+            props.taobaoData.balance = parseFloat((props.taobaoData.balance - amount).toFixed(2));
+
             const chat = getCurrentChat();
             if (redPacketForm.type === 'redpacket') {
                  const txt = redPacketForm.text || "恭喜发财，大吉大利";
-                 pushMessage(chat, 'user', 'redpacket', `[红包] ${txt}`, { packetText: txt });
+                 pushMessage(chat, 'user', 'redpacket', `[红包] ${txt}`, { packetText: txt, amount: redPacketForm.amount });
             } else {
                  pushMessage(chat, 'user', 'transfer', `[转账] ¥${redPacketForm.amount}`, { amount: redPacketForm.amount });
             }
@@ -1883,7 +1896,7 @@ const setFrame = (frame) => {
                         <!-- 说说列表 -->
                         <div v-if="qqData.momentsList && qqData.momentsList.length > 0" style="padding: 0 15px;">
                             <div v-for="moment in qqData.momentsList" :key="moment.id" style="padding: 15px 0; border-bottom: 1px solid #f0f0f0;">
-                                <div style="display: flex; align-items: flex-start; margin-bottom: 10px;">
+                                <div style="display: flex; align-items: center; margin-bottom: 10px;">
                                     <div :style="{ backgroundImage: qqData.selfAvatar ? 'url(' + qqData.selfAvatar + ')' : 'none' }" style="width: 40px; height: 40px; border-radius: 50%; background-color: #eee; margin-right: 10px; background-size: cover; background-position: center;"></div>
                                     <div style="flex: 1;">
                                         <div style="font-weight: bold; color: #586b95;">{{ qqData.selfName || '我' }}</div>
@@ -2058,37 +2071,50 @@ const setFrame = (frame) => {
                         <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
                         <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
                             <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
-                            <div class="chat-bubble"
-                                 @touchstart="handleMsgTouchStart($event, index)"
-                                 @touchend="handleMsgTouchEnd"
-                                 @touchcancel="handleMsgTouchEnd"
-                                 @contextmenu.prevent="showContextMenu($event, index)"
-                                 @click="toggleVoiceText(msg)"
-                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; display: flex; flex-direction: column; min-width: 60px; padding: 10px 12px;"
-                                 :style="{ width: (msg.isVoiceTextVisible ? 'auto' : (60 + msg.duration * 5) + 'px'), maxWidth: '240px' }"
-                            >
-                                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-                                    <template v-if="msg.role !== 'user'">
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="transform: rotate(180deg);">
-                                            <path d="M12 4L12 20M8 7L8 17M4 10L4 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                                            <path d="M16 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
-                                            <path d="M20 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
-                                        </svg>
-                                        <span :style="{ fontSize: (getCurrentChat().fontSize || 16) + 'px' }" style="font-weight: bold; margin-left: 5px;">{{ msg.duration }}"</span>
-                                    </template>
-                                    <template v-else>
-                                        <span :style="{ fontSize: (getCurrentChat().fontSize || 16) + 'px' }" style="font-weight: bold; margin-right: 5px;">{{ msg.duration }}"</span>
-                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                                            <path d="M3 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
-                                            <path d="M-1 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
-                                            <path d="M3 12a3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3 3 3 0 0 1-3-3" fill="currentColor" />
-                                        </svg>
-                                    </template>
-                                </div>
-                                <div v-if="msg.isVoiceTextVisible" 
-                                     :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }"
-                                     style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.1); text-align: left; line-height: 1.4; white-space: pre-wrap; word-break: break-all;">
-                                    {{ msg.voiceText }}
+                            <div :class="['message-bubble', msg.role === 'user' ? 'user' : 'ai']">
+                                <div class="content"
+                                     @touchstart="handleMsgTouchStart($event, index)"
+                                     @touchend="handleMsgTouchEnd"
+                                     @touchcancel="handleMsgTouchEnd"
+                                     @contextmenu.prevent="showContextMenu($event, index)"
+                                     @click="toggleVoiceText(msg)"
+                                     :style="[
+                                        {
+                                            width: (msg.isVoiceTextVisible ? 'auto' : (60 + msg.duration * 5) + 'px'),
+                                            maxWidth: '240px'
+                                        },
+                                        !getCurrentChat().customCSS
+                                            ? (msg.role === 'user'
+                                                ? { background: 'var(--accent-color)', color: '#fff', borderRadius: '18px', borderTopRightRadius: '4px' }
+                                                : { background: '#fff', color: '#000', borderRadius: '18px', borderTopLeftRadius: '4px' }
+                                            )
+                                            : {}
+                                     ]"
+                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; display: flex; flex-direction: column; min-width: 60px; padding: 10px 12px;"
+                                >
+                                    <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                                        <template v-if="msg.role !== 'user'">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="transform: rotate(180deg);">
+                                                <path d="M12 4L12 20M8 7L8 17M4 10L4 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                                <path d="M16 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
+                                                <path d="M20 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
+                                            </svg>
+                                            <span :style="{ fontSize: (getCurrentChat().fontSize || 16) + 'px' }" style="font-weight: bold; margin-left: 5px;">{{ msg.duration }}"</span>
+                                        </template>
+                                        <template v-else>
+                                            <span :style="{ fontSize: (getCurrentChat().fontSize || 16) + 'px' }" style="font-weight: bold; margin-right: 5px;">{{ msg.duration }}"</span>
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                                <path d="M3 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
+                                                <path d="M-1 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
+                                                <path d="M3 12a3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3 3 3 0 0 1-3-3" fill="currentColor" />
+                                            </svg>
+                                        </template>
+                                    </div>
+                                    <div v-if="msg.isVoiceTextVisible" 
+                                         :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }"
+                                         style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.1); text-align: left; line-height: 1.4; white-space: pre-wrap; word-break: break-all;">
+                                        {{ msg.voiceText }}
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -2281,7 +2307,7 @@ const setFrame = (frame) => {
                                      @touchend="handleMsgTouchEnd"
                                      @touchcancel="handleMsgTouchEnd"
                                      @contextmenu.prevent="showContextMenu($event, index)"
-                                     :style="!getCurrentChat().customCSS ? (msg.role === 'user' ? 'background: #0099FF; color: #fff; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;' : 'background: #fff; color: #000; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;') : 'font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;'"
+                                     :style="!getCurrentChat().customCSS ? (msg.role === 'user' ? 'background: var(--accent-color); color: #fff; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;' : 'background: #fff; color: #000; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;') : 'font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;'"
 
                                      style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none;"
                                 >{{ msg.content }}</div>
@@ -2696,7 +2722,7 @@ const setFrame = (frame) => {
                             <div style="display: flex; margin-bottom: 0; align-items: flex-start; flex-direction: row-reverse;">
                                 <div style="width: 36px; height: 36px; border-radius: 50%; background: #ddd; margin-left: 10px; flex-shrink: 0;"></div>
                                 <div class="message-bubble user">
-                                    <div class="content" :style="!tempQQSettings.customCSS ? 'background: var(--accent-color); color: #333; padding: 10px 12px; border-radius: 8px; max-width: 200px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);' : 'padding: 10px 12px; border-radius: 8px; max-width: 200px;'">
+                                    <div class="content" :style="!tempQQSettings.customCSS ? 'background: var(--accent-color); color: #fff; padding: 10px 12px; border-radius: 8px; max-width: 200px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);' : 'padding: 10px 12px; border-radius: 8px; max-width: 200px;'">
                                         这是用户的消息气泡
                                     </div>
                                 </div>

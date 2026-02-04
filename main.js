@@ -8,9 +8,11 @@ import OtomegameApp from './apps/OtomegameApp.js';
 import WorldbookApp from './apps/WorldbookApp.js';
 import SavedataApp from './apps/SavedataApp.js';
 import TaobaoApp from './apps/TaobaoApp.js';
+import AnonymousboxApp from './apps/AnonymousboxApp.js';
+import CheckphoneApp from './apps/CheckphoneApp.js';
 
 createApp({
-    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp, OtomegameApp, WorldbookApp, SavedataApp, TaobaoApp },
+    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp, OtomegameApp, WorldbookApp, SavedataApp, TaobaoApp, AnonymousboxApp, CheckphoneApp },
     setup() {
         // === 1. 定义默认数据 ===
         const defaultData = {
@@ -51,7 +53,9 @@ createApp({
             apiConfig: { endpoint: '', key: '', model: '' },
             modelList: [],
             savedApis: [],
-            qqChats: [] 
+            qqChats: [],
+            anonymousUsername: '点击修改昵称',
+            anonymousPosts: []
         };
 
         // === 2. 响应式状态 ===
@@ -85,7 +89,27 @@ createApp({
         const apiConfig = reactive({ ...defaultData.apiConfig });
         const modelList = ref([]);
         const savedApis = ref([]);
-        const qqData = reactive({ chatList: [], currentChatId: null, inputMsg: '', isSending: false, aiGeneralStickers: [], userStickers: [], universalWallpaper: '' });
+        const qqData = reactive({ 
+            chatList: [], 
+            currentChatId: null, 
+            inputMsg: '', 
+            isSending: false, 
+            aiGeneralStickers: [], 
+            userStickers: [], 
+            universalWallpaper: '',
+            // 匿名箱数据
+            anonymousUsername: defaultData.anonymousUsername,
+            anonymousPosts: defaultData.anonymousPosts,
+            anonymousConfigs: [] // 确保该字段存在
+        });
+
+        const taobaoData = reactive({
+            balance: 500,
+            cart: [],
+            products: [],
+            orders: [],
+            transactions: []
+        });
         
         // App 开关状态
         const isQQOpen = ref(false);
@@ -96,6 +120,8 @@ createApp({
         const isWorldbookOpen = ref(false);
         const isSavedataOpen = ref(false);
         const isTaobaoOpen = ref(false);
+        const isAnonymousboxOpen = ref(false);
+        const isCheckphoneOpen = ref(false);
 
         // 页面滑动
         const currentPage = ref(0);
@@ -142,6 +168,10 @@ createApp({
             colors, allApps, avatar, presetFrames, customFrames, wallpapers
         });
 
+        const taobaoState = reactive({
+            taobaoData
+        });
+
         const STORAGE_KEY = 'mySpaceData_v6_vue_split';
 
         // === 3. 读写存档逻辑 (升级为 IndexedDB) ===
@@ -161,6 +191,26 @@ createApp({
                         localStorage.removeItem(STORAGE_KEY);
                     }
                 }
+
+                // 尝试加载旧的淘宝数据
+                const oldTaobaoData = localStorage.getItem('taobaoAppData');
+                if (oldTaobaoData) {
+                    try {
+                        const parsed = JSON.parse(oldTaobaoData);
+                        if (parsed) {
+                            taobaoData.balance = parsed.balance ?? taobaoData.balance;
+                            taobaoData.cart = parsed.cart ?? taobaoData.cart;
+                            if (Array.isArray(parsed.products) && parsed.products.length > 0) {
+                               taobaoData.products = parsed.products;
+                            }
+                            console.log("🔄 已迁移旧的桃Bao应用数据。");
+                            localStorage.removeItem('taobaoAppData'); // 迁移后删除旧数据
+                        }
+                    } catch(e) {
+                        console.error("迁移桃Bao数据失败", e);
+                    }
+                }
+
 
                 if (saved) {
                     const data = JSON.parse(saved);
@@ -202,6 +252,8 @@ createApp({
                     if(data.modelList) modelList.value = data.modelList;
                     if(data.savedApis) savedApis.value = data.savedApis;
                     if(data.qqChats) qqData.chatList = data.qqChats;
+                    if(data.anonymousUsername) qqData.anonymousUsername = data.anonymousUsername;
+                    if(data.anonymousPosts) qqData.anonymousPosts = data.anonymousPosts;
                     
                     if(data.aiGeneralStickers) qqData.aiGeneralStickers = data.aiGeneralStickers;
                     if(data.userStickers) qqData.userStickers = data.userStickers;
@@ -217,6 +269,12 @@ createApp({
                     if(data.qqVisitorCount) qqData.visitorCount = data.qqVisitorCount;
                     // 新增：恢复说说列表
                     if(data.qqMomentsList) qqData.momentsList = data.qqMomentsList;
+                    // 修正：确保 qqData.anonymousConfigs 被正确赋值
+                    if(data.qqAnonymousConfigs) qqData.anonymousConfigs = data.qqAnonymousConfigs;
+
+                    // 恢复淘宝数据
+                    if(data.taobaoData) Object.assign(taobaoData, data.taobaoData);
+
 
                     console.log("✅ 存檔讀取成功 (IndexedDB)");
                 }
@@ -239,6 +297,7 @@ createApp({
                     wallpaper: wallpaper.value, avatar: avatar, profile: profile, colors: colors,
                     photos: photos, desktopApps: desktopApps, desktopAppsPage2: desktopAppsPage2, dockApps: dockApps, textWidgets: textWidgets,
                     apiConfig: apiConfig, modelList: modelList.value, savedApis: savedApis.value,
+                    // QQ 数据打包
                     qqChats: qqData.chatList,
                     aiGeneralStickers: qqData.aiGeneralStickers,
                     userStickers: qqData.userStickers,
@@ -247,7 +306,14 @@ createApp({
                     qqSelfAvatar: qqData.selfAvatar,
                     qqSelfName: qqData.selfName,
                     qqVisitorCount: qqData.visitorCount,
-                    qqMomentsList: qqData.momentsList, // 新增：保存说说列表
+                    qqMomentsList: qqData.momentsList,
+                    // 匿名箱数据
+                    anonymousConfigs: qqData.anonymousConfigs,
+                    anonymousUsername: qqData.anonymousUsername,
+                    anonymousPosts: qqData.anonymousPosts,
+                    // 淘宝数据
+                    taobaoData: taobaoData,
+                    // 其他
                     customFrames: customFrames
                 };
                 try { 
@@ -401,7 +467,7 @@ createApp({
         };
 
         // 监听变化自动保存
-        watch([wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets, customFrames, apiConfig, modelList, savedApis, () => qqData.chatList, () => qqData.aiGeneralStickers, () => qqData.userStickers, () => qqData.universalWallpaper, () => qqData.momentsBackground, () => qqData.selfAvatar, () => qqData.selfName, () => qqData.visitorCount, () => qqData.momentsList], () => {
+        watch([wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets, customFrames, apiConfig, modelList, savedApis, qqData, taobaoData], () => {
             saveData();
         }, { deep: true });
         
@@ -481,6 +547,8 @@ createApp({
             else if (key === 'world') isWorldbookOpen.value = true;
             else if (key === 'storage') isSavedataOpen.value = true;
             else if (key === 'taobao') isTaobaoOpen.value = true;
+            else if (key === 'mailbox') isAnonymousboxOpen.value = true;
+            else if (key === 'phone') isCheckphoneOpen.value = true;
         };
 
         // === 4. 强制链接上传逻辑 ===
@@ -628,9 +696,9 @@ createApp({
 
         return {
             wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets,
-            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen, isWorldbookOpen, isSavedataOpen, isTaobaoOpen,
+            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen, isWorldbookOpen, isSavedataOpen, isTaobaoOpen, isAnonymousboxOpen, isCheckphoneOpen,
             activeModal, tempText, tempInputVal, editTargetLabel, fileInput,
-            apiConfig, modelList, savedApis, qqData, themeState,
+            apiConfig, modelList, savedApis, qqData, themeState, taobaoData,
             uploadTargetType, uploadTargetIndex, customFrames, presetFrames,
             currentPage,
             screensContainerStyle, // 导出样式

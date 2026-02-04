@@ -122,6 +122,7 @@
             :is-open="isQQOpen" 
             :api-config="apiConfig" 
             :qq-data="qqData"
+            :taobao-data="taobaoData"
             :preset-frames="presetFrames"
             :custom-frames="customFrames"
             @frame-action="handleFrameAction"
@@ -168,8 +169,24 @@
 
         <taobao-app 
             :is-open="isTaobaoOpen"
+            :api-config="apiConfig"
+            :taobao-data="taobaoData"
             @close="isTaobaoOpen = false">
         </taobao-app>
+
+        <anonymousbox-app 
+            :is-open="isAnonymousboxOpen"
+            :qq-data="qqData"
+            :api-config="apiConfig"
+            @close="isAnonymousboxOpen = false">
+        </anonymousbox-app>
+
+        <checkphone-app
+            :is-open="isCheckphoneOpen"
+            :qq-data="qqData"
+            :api-config="apiConfig"
+            @close="isCheckphoneOpen = false">
+        </checkphone-app>
 
         <!-- === 弹窗 === -->
         <div class="modal-overlay" v-if="activeModal === 'singleEdit'" @click.self="activeModal = null">
