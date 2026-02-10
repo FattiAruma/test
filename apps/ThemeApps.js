@@ -81,6 +81,11 @@ export default {
                     <input type="color" class="hidden-color-input" v-model="state.colors.app">
                 </div>
                 <div class="settings-item">
+                    <div class="color-preview-dot" :style="{ backgroundColor: state.colors.appNameShadow }"></div>
+                    <span class="item-label">App 图标文字阴影</span><span class="item-arrow">＞</span>
+                    <input type="color" class="hidden-color-input" v-model="state.colors.appNameShadow">
+                </div>
+                <div class="settings-item">
                     <div class="color-preview-dot" :style="{ backgroundColor: state.colors.widget }"></div>
                     <span class="item-label">桌面组件文字</span><span class="item-arrow">＞</span>
                     <input type="color" class="hidden-color-input" v-model="state.colors.widget">

@@ -33,14 +33,43 @@ export default {
         const locationForm = reactive({ start: '当前位置', via: '', end: '' });
 
         const isRedPacketModalOpen = ref(false);
-        const redPacketForm = reactive({ type: 'redpacket', text: '', amount: '' });
+        const redPacketForm = reactive({ 
+            // 新增：红包类型 'lucky' (拼手气) 或 'exclusive' (专属)
+            type: 'lucky', 
+            text: '', 
+            amount: '',
+            // 新增：红包个数
+            count: '',
+            // 新增：专属红包接收者ID
+            recipientId: null
+        });
+        // 新增：红包模态框的当前tab
+        const redPacketTab = ref('lucky');
+        // 新增：红包领取详情弹窗
+        const redPacketDetailsModal = reactive({
+            visible: false,
+            msg: null
+        });
+
+        // 新增：排序后的红包领取列表
+        const sortedClaimedUsers = computed(() => {
+            if (!redPacketDetailsModal.msg || !redPacketDetailsModal.msg.claimedUsers) return [];
+            return [...redPacketDetailsModal.msg.claimedUsers].sort((a, b) => parseFloat(b.amount) - parseFloat(a.amount));
+        });
 
         // 新增：链接功能状态
         const isLinkModalOpen = ref(false);
         const linkForm = reactive({ title: '', source: '', content: '' });
         const linkViewer = reactive({ visible: false, data: {} });
 
-        const forwardViewer = reactive({ visible: false, title: '', list: [] });
+        // 新增：引用功能状态
+        const quotingMsg = ref(null);
+        const cancelQuote = () => {
+            quotingMsg.value = null;
+            nextTick(adjustInputHeight);
+        };
+
+        const forwardViewer = reactive({ visible: false, title: '', list: [], sourceIsGroup: false });
         const textViewer = reactive({ visible: false, content: '' });
         
         // --- 新增：表情包相关状态 ---
@@ -71,7 +100,7 @@ export default {
         const isNpcManagerOpen = ref(false);
         const isNpcEditOpen = ref(false); // 保留变量定义以防报错，但不再使用
         const npcManagerTab = ref('list'); // 'list' | 'add'
-        const tempNpcData = reactive({ name: '', setting: '', relation: '' });
+        const tempNpcData = reactive({ name: '', setting: '', relation: '', avatar: '' });
         const editingNpcIndex = ref(-1);
 
         // 新增：说说（动态）功能状态
@@ -85,11 +114,429 @@ export default {
         const isAtUserModalOpen = ref(false);
         const momentImageInput = ref(null);
 
+        // 新增：动态生成器状态
+        const isMomentGenSettingsOpen = ref(false);
+        const selectedGenFriendIds = ref(new Set());
+        const isGeneratingMoment = ref(false);
+
+        // --- 群组功能状态 ---
+        const isGroupCreateOpen = ref(false);
+        const isAnnouncementModalOpen = ref(false);
+        const tempAnnouncementText = ref('');
+        const announcementModalMode = ref('view'); // 'view' or 'edit'
+        const groupNameInput = ref('');
+        const selectedFriendIds = ref(new Set());
+
+        const openGroupCreate = () => {
+            groupNameInput.value = '';
+            selectedFriendIds.value.clear();
+            isGroupCreateOpen.value = true;
+        };
+
+        const toggleGroupFriendSelection = (chat) => {
+            if (selectedFriendIds.value.has(chat.id)) {
+                selectedFriendIds.value.delete(chat.id);
+            } else {
+                selectedFriendIds.value.add(chat.id);
+            }
+        };
+
+        const createGroup = () => {
+            if (!groupNameInput.value.trim()) {
+                alert("请输入群名称");
+                return;
+            }
+            if (selectedFriendIds.value.size < 2) {
+                alert("群组最少需要选择 2 位好友");
+                return;
+            }
+
+            const members = props.qqData.chatList.filter(c => selectedFriendIds.value.has(c.id)).map(c => ({
+                id: c.id,
+                name: c.remark || c.name,
+                avatar: c.avatar,
+                persona: c.aiPersona || '',
+                role: 'member', // member, admin, owner
+                title: '',
+                groupNickname: '',
+                memberAvatarFrame: ''
+            }));
+
+            // 将自己添加为群主
+            members.unshift({
+                id: 'self',
+                name: props.qqData.selfName || '我',
+                avatar: props.qqData.selfAvatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg',
+                persona: props.qqData.userPersona || '',
+                role: 'owner',
+                title: '',
+                isSelf: true,
+                groupNickname: '',
+                memberAvatarFrame: ''
+            });
+
+            const newChat = {
+                id: Date.now(),
+                name: groupNameInput.value,
+                remark: groupNameInput.value,
+                avatar: 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg', // 默认群头像
+                userAvatar: props.qqData.selfAvatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg',
+                isGroup: true,
+                members: members,
+                messages: [],
+                lastMsg: '群组已创建',
+                lastTime: '刚刚',
+                contextLimit: 10,
+                enableSummary: false,
+                summaryMode: 'auto',
+                summaryTriggerCount: 20,
+                summaryPrompt: '请以第三人称视角，客观、详细地总结近期群聊内容。请在总结中明确提及具体成员的姓名和他们的发言要点，而不是用“群友们”等模糊的词语代替。保留关键信息和对话走向。',
+                memoryList: [],
+                msgCountSinceSummary: 0,
+                aiExclusiveStickers: [],
+                heartThoughts: [],
+                status: 'online',
+                selectedWorldbooks: [],
+                timeAware: false,
+                timeOverride: '',
+                backgroundUrl: '',
+                aiAvatarFrame: '',
+                userAvatarFrame: '',
+                npcList: [],
+                groupAnnouncement: ''
+            };
+
+            props.qqData.chatList.unshift(newChat);
+            isGroupCreateOpen.value = false;
+        };
+
+        // --- 群组管理弹窗状态 ---
+        const isRoleModalOpen = ref(false);
+        const isPersonaModalOpen = ref(false);
+        const currentMember = ref(null);
+        const tempPersonaText = ref('');
+        // 新增：成员信息编辑状态
+        const tempMemberNickname = ref('');
+        const tempMemberAvatarFrame = ref('');
+        const isMemberFrameModalOpen = ref(false);
+
+        const openRoleModal = (member) => {
+            currentMember.value = member;
+            isRoleModalOpen.value = true;
+        };
+
+        const toggleAdmin = () => {
+            if (!currentMember.value) return;
+            
+            if (currentMember.value.role === 'admin') {
+                currentMember.value.role = 'member';
+                if (tempQQSettings.isGroup) {
+                    if (!tempQQSettings.pendingSystemMessages) tempQQSettings.pendingSystemMessages = [];
+                    tempQQSettings.pendingSystemMessages.push(`${currentMember.value.name} 被取消了管理员`);
+                }
+            } else {
+                currentMember.value.role = 'admin';
+                if (tempQQSettings.isGroup) {
+                    if (!tempQQSettings.pendingSystemMessages) tempQQSettings.pendingSystemMessages = [];
+                    tempQQSettings.pendingSystemMessages.push(`${currentMember.value.name} 被设置为管理员`);
+                }
+            }
+            isRoleModalOpen.value = false;
+        };
+
+        const transferOwner = () => {
+            if (!currentMember.value) return;
+            if (!confirm(`确定要将群主转让给 ${currentMember.value.name} 吗？`)) return;
+            
+            // 找到旧群主并降级
+            const oldOwner = tempQQSettings.members.find(m => m.role === 'owner');
+            if (oldOwner) {
+                oldOwner.role = 'admin'; 
+            }
+            
+            currentMember.value.role = 'owner';
+            
+            if (tempQQSettings.isGroup) {
+                if (!tempQQSettings.pendingSystemMessages) tempQQSettings.pendingSystemMessages = [];
+                const operatorName = tempQQSettings.userGroupNickname || props.qqData.selfName || '我';
+                tempQQSettings.pendingSystemMessages.push(`${operatorName} 将群主转让给了 ${currentMember.value.name}`);
+            }
+
+            isRoleModalOpen.value = false;
+        };
+
+        const openPersonaModal = (member) => {
+            currentMember.value = member;
+            tempPersonaText.value = member.persona || '';
+            // 初始化群昵称，如果没有则预设为本名
+            tempMemberNickname.value = member.groupNickname || member.name;
+            tempMemberAvatarFrame.value = member.memberAvatarFrame || '';
+            isPersonaModalOpen.value = true;
+        };
+
+        const savePersona = () => {
+            if (currentMember.value) {
+                currentMember.value.persona = tempPersonaText.value;
+                currentMember.value.groupNickname = tempMemberNickname.value;
+                currentMember.value.memberAvatarFrame = tempMemberAvatarFrame.value;
+            }
+            isPersonaModalOpen.value = false;
+        };
+
+        const openMemberFrameModal = () => {
+            isMemberFrameModalOpen.value = true;
+        };
+
+        const setMemberFrame = (frame) => {
+            tempMemberAvatarFrame.value = frame;
+            isMemberFrameModalOpen.value = false;
+        };
+
+        const setMemberTitle = (member) => {
+            const title = prompt("请输入群头衔：", member.title || '');
+            if (title !== null) {
+                member.title = title;
+                if (tempQQSettings.isGroup) {
+                    if (!tempQQSettings.pendingSystemMessages) tempQQSettings.pendingSystemMessages = [];
+                    const operatorName = tempQQSettings.userGroupNickname || props.qqData.selfName || '我';
+                    tempQQSettings.pendingSystemMessages.push(`${operatorName} 将 ${member.name} 的群头衔设置为‘${title}’`);
+                }
+            }
+        };
+
+        // --- 新增：添加群成员功能 ---
+        const isAddMemberModalOpen = ref(false);
+        const selectedNewMemberIds = ref(new Set());
+
+        const openAddMemberModal = () => {
+            selectedNewMemberIds.value.clear();
+            isAddMemberModalOpen.value = true;
+        };
+
+        const toggleNewMemberSelection = (chat) => {
+            if (selectedNewMemberIds.value.has(chat.id)) {
+                selectedNewMemberIds.value.delete(chat.id);
+            } else {
+                selectedNewMemberIds.value.add(chat.id);
+            }
+        };
+
+        const addMembersToGroup = () => {
+            if (selectedNewMemberIds.value.size === 0) return;
+            
+            if (!tempQQSettings.members) tempQQSettings.members = [];
+            
+            // 过滤出选中的好友
+            const newMembers = props.qqData.chatList
+                .filter(c => selectedNewMemberIds.value.has(c.id))
+                .map(c => ({
+                    id: c.id,
+                    name: c.remark || c.name,
+                    avatar: c.avatar,
+                    persona: c.aiPersona || '', // 自动搬运人设
+                    role: 'member',
+                    title: '',
+                    groupNickname: '',
+                    memberAvatarFrame: ''
+                }));
+            
+            tempQQSettings.members.push(...newMembers);
+            isAddMemberModalOpen.value = false;
+        };
+
+        // --- 群公告功能 ---
+        const openAnnouncementModal = () => {
+            const chat = getCurrentChat();
+            if (!chat.isGroup) return;
+            announcementModalMode.value = 'view';
+            isAnnouncementModalOpen.value = true;
+        };
+
+        const setAnnouncementMode = (mode) => {
+            const chat = getCurrentChat();
+            if (mode === 'edit') {
+                // 检查权限
+                const self = chat.members.find(m => m.isSelf || m.id === 'self');
+                const canEdit = self && (self.role === 'owner' || self.role === 'admin');
+                if (!canEdit) {
+                    alert('只有群主或管理员可以编辑群公告');
+                    return;
+                }
+                tempAnnouncementText.value = chat.groupAnnouncement || '';
+            }
+            announcementModalMode.value = mode;
+        };
+
+        const saveAnnouncement = () => {
+            const chat = getCurrentChat();
+            if (!chat.isGroup) return;
+
+            if (chat.groupAnnouncement !== tempAnnouncementText.value) {
+                chat.groupAnnouncement = tempAnnouncementText.value;
+                const nickname = chat.userGroupNickname || props.qqData.selfName || '我';
+                pushMessage(chat, 'system', 'announcement_update', `${nickname} 修改了群公告`);
+            }
+            isAnnouncementModalOpen.value = false;
+        };
+
         // 新增：动态页面滚动透明度
         const momentsHeaderOpacity = ref(0);
 
         // 新增：说说菜单
         const activeMomentMenu = ref(null);
+
+        // 新增：转发说说状态
+        const isForwardMomentModalOpen = ref(false);
+        const forwardingMoment = ref(null);
+        const momentDetailModal = reactive({ visible: false, moment: null });
+
+        const openForwardMomentModal = (moment) => {
+            forwardingMoment.value = moment;
+            isForwardMomentModalOpen.value = true;
+        };
+
+        const confirmForwardMoment = (targetChatId) => {
+            if (!forwardingMoment.value) return;
+            const targetChat = props.qqData.chatList.find(c => c.id === targetChatId);
+            if (!targetChat) return;
+
+            const moment = forwardingMoment.value;
+            const shareContent = `[动态分享] ${moment.content || '分享图片'}`;
+            
+            pushMessage(targetChat, 'user', 'moment_share', shareContent, {
+                momentData: JSON.parse(JSON.stringify(moment)) // Deep copy
+            });
+
+            isForwardMomentModalOpen.value = false;
+            forwardingMoment.value = null;
+            alert(`已转发给 ${targetChat.remark || targetChat.name}`);
+        };
+
+        const openMomentDetail = (msg) => {
+            if (msg.momentData) {
+                momentDetailModal.moment = msg.momentData;
+                momentDetailModal.visible = true;
+            }
+        };
+
+        // 获取成员实时头像 (用于编辑弹窗)
+        const getRealtimeMemberAvatar = (memberId) => {
+            if (!memberId) return 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg';
+            if (memberId === 'self') return props.qqData.selfAvatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg';
+            const chat = props.qqData.chatList.find(c => c.id === memberId);
+            return chat ? chat.avatar : 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg';
+        };
+
+        // 获取消息头像 (支持群聊动态头像)
+        const getMessageAvatar = (msg) => {
+            const chat = getCurrentChat();
+            if (!chat) return '';
+            
+            if (chat.isGroup) {
+                if (msg.role === 'user') {
+                    return props.qqData.selfAvatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg';
+                }
+                const name = msg.customName || msg.name;
+                // 修改：同时匹配群昵称和本名
+                const member = chat.members ? chat.members.find(m => m.groupNickname === name || m.name === name) : null;
+                if (member) {
+                    if (member.id === 'self') return props.qqData.selfAvatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg';
+                    // 尝试从 chatList 中查找最新头像
+                    const originalChat = props.qqData.chatList.find(c => c.id === member.id);
+                    return originalChat ? originalChat.avatar : member.avatar;
+                }
+                return msg.customAvatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg';
+            } else {
+                // 单聊
+                if (msg.role === 'user') {
+                    return chat.userAvatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg';
+                } else {
+                    return msg.customAvatar || chat.avatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg';
+                }
+            }
+        };
+
+        // 获取消息头像框 (支持群聊专属头像框)
+        const getMessageFrame = (msg) => {
+            const chat = getCurrentChat();
+            if (!chat) return '';
+
+            if (chat.isGroup) {
+                if (msg.role === 'user') {
+                    // 群聊中的自己
+                    const selfMember = chat.members ? chat.members.find(m => m.isSelf || m.id === 'self') : null;
+                    return selfMember ? selfMember.memberAvatarFrame : '';
+                }
+                const name = msg.customName || msg.name;
+                // 修改：同时匹配群昵称和本名
+                const member = chat.members ? chat.members.find(m => m.groupNickname === name || m.name === name) : null;
+                return member ? member.memberAvatarFrame : '';
+            } else {
+                // 单聊
+                return msg.role === 'user' ? chat.userAvatarFrame : chat.aiAvatarFrame;
+            }
+        };
+
+        // 获取成员头衔信息
+        const getMemberRoleInfo = (chat, msg) => {
+            if (!chat || !chat.members) return null;
+            
+            let member = null;
+            if (msg.role === 'user') {
+                // 找自己 (isSelf 标记或 id 为 self)
+                member = chat.members.find(m => m.isSelf || m.id === 'self');
+                // 如果没找到，尝试通过名字匹配 (兼容旧数据)
+                if (!member) {
+                    const selfName = props.qqData.selfName || '我';
+                    member = chat.members.find(m => m.name === selfName);
+                }
+                // 如果还是找不到（旧群组数据），默认视为群主
+                if (!member) {
+                    member = { role: 'owner', title: '' };
+                }
+            } else {
+                // 找别人，按名字匹配
+                const name = msg.customName || msg.name;
+                if (name) {
+                    // 修改：同时匹配群昵称和本名
+                    member = chat.members.find(m => m.groupNickname === name || m.name === name);
+                }
+            }
+            
+            if (!member) return null;
+
+            const role = member.role; // 'owner', 'admin', 'member'
+            const title = member.title;
+            
+            // 颜色配置
+            // 群主: 黄色
+            const ownerStyle = { background: '#fff7cc', color: '#bfa300', border: '1px solid #ffe58f' };
+            // 管理员: 绿色
+            const adminStyle = { background: '#f6ffed', color: '#389e0d', border: '1px solid #b7eb8f' };
+            // 普通成员: 紫色
+            const memberStyle = { background: '#f9f0ff', color: '#531dab', border: '1px solid #d3adf7' };
+
+            if (role === 'owner') {
+                return {
+                    text: title || '群主',
+                    style: ownerStyle
+                };
+            } else if (role === 'admin') {
+                return {
+                    text: title || '管理员',
+                    style: adminStyle
+                };
+            } else {
+                // 普通成员只有在有头衔时才显示
+                if (title) {
+                    return {
+                        text: title,
+                        style: memberStyle
+                    };
+                }
+            }
+            return null;
+        };
 
         const loadWorldbooks = async () => {
             try {
@@ -146,6 +593,51 @@ export default {
             return props.qqData.chatList.find(c => c.id === props.qqData.currentChatId) || {};
         };
 
+        // 新增：计算最终的CSS (合并通用CSS和群成员专属CSS)
+        const finalCustomCSS = computed(() => {
+            const chat = getCurrentChat();
+            let css = chat.customCSS || '';
+            
+            if (chat.isGroup && chat.memberBubbleStyles) {
+                for (const [memberId, style] of Object.entries(chat.memberBubbleStyles)) {
+                    if (style && style.trim()) {
+                        css += '\n' + style;
+                    }
+                }
+            }
+            return css;
+        });
+
+        // 新增：获取成员气泡类名
+        const getMemberBubbleClass = (msg) => {
+            const chat = getCurrentChat();
+            if (!chat || !chat.isGroup || msg.role === 'user') return '';
+            
+            const name = msg.customName || msg.name;
+            // 修改：同时匹配群昵称和本名
+            const member = chat.members ? chat.members.find(m => m.groupNickname === name || m.name === name) : null;
+            
+            if (member && member.id) {
+                return `member-bubble-${member.id}`;
+            }
+            return '';
+        };
+
+        // 新增：检查消息是否有成员自定义样式
+        const hasMemberCustomStyle = (msg) => {
+            const chat = getCurrentChat();
+            if (!chat || !chat.isGroup || msg.role === 'user') return false;
+            
+            const name = msg.customName || msg.name;
+            // 同时匹配群昵称和本名
+            const member = chat.members ? chat.members.find(m => m.groupNickname === name || m.name === name) : null;
+            
+            if (member && member.id && chat.memberBubbleStyles && chat.memberBubbleStyles[member.id]) {
+                return !!chat.memberBubbleStyles[member.id].trim();
+            }
+            return false;
+        };
+
         const showSummaryAlert = computed(() => {
             const chat = getCurrentChat();
             if (!chat || !chat.enableSummary || chat.summaryMode === 'auto') return false;
@@ -175,8 +667,8 @@ export default {
         id: Date.now(),
         name: name,
         remark: remark || name,
-        avatar: '', 
-        userAvatar: '', 
+        avatar: 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg', 
+        userAvatar: 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg', 
         gender: '未知',
         aiPersona: '', 
         userPersona: '',
@@ -243,26 +735,75 @@ export default {
             if (chat.userAvatarFrame === undefined) chat.userAvatarFrame = '';
             // 新增：初始化NPC库
             if (chat.npcList === undefined) chat.npcList = [];
+            // 新增：初始化群公告
+            if (chat.groupAnnouncement === undefined) chat.groupAnnouncement = '';
+            // 新增：初始化成员气泡样式
+            if (chat.memberBubbleStyles === undefined) chat.memberBubbleStyles = {};
 
             if(chat.currentSummary && typeof chat.currentSummary === 'string') {
                 chat.memoryList.push({ id: Date.now(), content: chat.currentSummary });
                 delete chat.currentSummary;
             }
 
-            Object.assign(tempQQSettings, JSON.parse(JSON.stringify(chat)));
+            // 先清空 tempQQSettings 以防止旧状态残留
+            for (const key in tempQQSettings) {
+                delete tempQQSettings[key];
+            }
+            
+            // 优化：不再深拷贝整个 chat 对象（包含巨大的 messages），而是只拷贝设置相关的字段
+            const settingsToCopy = [
+                'id', 'name', 'remark', 'avatar', 'userAvatar', 'gender', 
+                'aiPersona', 'userPersona', 'contextLimit', 
+                'enableSummary', 'summaryMode', 'summaryTriggerCount', 'summaryPrompt',
+                'status', 'timeAware', 'timeOverride', 'backgroundUrl',
+                'aiAvatarFrame', 'userAvatarFrame', 'groupAnnouncement',
+                'isGroup', 'userGroupNickname', 'fontSize', 'customCSS'
+            ];
+
+            settingsToCopy.forEach(key => {
+                if (chat[key] !== undefined) {
+                    tempQQSettings[key] = chat[key];
+                }
+            });
+
+            // 对于数组和对象类型的设置，需要深拷贝以防止修改影响原数据，直到保存
+            if (chat.memoryList) tempQQSettings.memoryList = JSON.parse(JSON.stringify(chat.memoryList));
+            if (chat.aiExclusiveStickers) tempQQSettings.aiExclusiveStickers = JSON.parse(JSON.stringify(chat.aiExclusiveStickers));
+            if (chat.selectedWorldbooks) tempQQSettings.selectedWorldbooks = JSON.parse(JSON.stringify(chat.selectedWorldbooks));
+            if (chat.npcList) tempQQSettings.npcList = JSON.parse(JSON.stringify(chat.npcList));
+            if (chat.members) tempQQSettings.members = JSON.parse(JSON.stringify(chat.members));
+            if (chat.memberBubbleStyles) tempQQSettings.memberBubbleStyles = JSON.parse(JSON.stringify(chat.memberBubbleStyles));
+
+            // 确保 isGroup 属性存在
+            if (tempQQSettings.isGroup === undefined) tempQQSettings.isGroup = false;
+            
+            // 初始化待发送系统消息队列
+            tempQQSettings.pendingSystemMessages = [];
+            
             isQQSettingsOpen.value = true;
         };
 
         const saveQQSettings = () => {
             const chatIndex = props.qqData.chatList.findIndex(c => c.id === props.qqData.currentChatId);
             if (chatIndex !== -1) {
-                Object.assign(props.qqData.chatList[chatIndex], tempQQSettings);
+                const chat = props.qqData.chatList[chatIndex];
+                Object.assign(chat, tempQQSettings);
+
+                // 发送累积的系统消息
+                if (tempQQSettings.isGroup && tempQQSettings.pendingSystemMessages && tempQQSettings.pendingSystemMessages.length > 0) {
+                    tempQQSettings.pendingSystemMessages.forEach(msg => {
+                        pushMessage(chat, 'system', 'announcement_update', msg);
+                    });
+                }
             }
             isQQSettingsOpen.value = false;
         };
 
         const deleteCurrentChat = () => {
-            if (confirm("确定要删除这个好友和所有聊天记录吗？")) {
+            const chat = getCurrentChat();
+            const isGroup = chat ? chat.isGroup : false;
+            const confirmText = isGroup ? "确定要解散这个群组和所有聊天记录吗？" : "确定要删除这个好友和所有聊天记录吗？";
+            if (confirm(confirmText)) {
                 const index = props.qqData.chatList.findIndex(c => c.id === props.qqData.currentChatId);
                 if (index !== -1) props.qqData.chatList.splice(index, 1);
                 isQQSettingsOpen.value = false;
@@ -368,6 +909,7 @@ export default {
             else if(type === 'transfer') displayLastMsg = '[转账]';
             else if(type === 'location') displayLastMsg = '[位置]';
             else if(type === 'link') displayLastMsg = '[链接]';
+            else if(type === 'moment_share') displayLastMsg = '[动态分享]';
 
             chat.lastMsg = displayLastMsg;
             chat.lastTime = new Date().getHours() + ':' + String(new Date().getMinutes()).padStart(2, '0');
@@ -386,41 +928,260 @@ export default {
             const chat = props.qqData.chatList.find(c => c.id === props.qqData.currentChatId);
             const userContent = props.qqData.inputMsg;
             props.qqData.inputMsg = ''; 
+            
+            const extra = {};
+            if (quotingMsg.value) {
+                extra.quote = { ...quotingMsg.value };
+                quotingMsg.value = null;
+            }
+
             nextTick(adjustInputHeight);
 
-            pushMessage(chat, 'user', 'text', userContent);
+            pushMessage(chat, 'user', 'text', userContent, extra);
         };
 
         // --- 功能函数 ---
         const openRedPacketModal = (type) => {
-            redPacketForm.type = type;
-            redPacketForm.text = type === 'redpacket' ? '恭喜发财，大吉大利' : '转账给你';
-            redPacketForm.amount = '';
+            const chat = getCurrentChat();
+            if (chat.isGroup) {
+                // 群聊红包
+                redPacketTab.value = 'lucky'; // 默认打开为拼手气
+                redPacketForm.type = 'lucky';
+                redPacketForm.text = '恭喜发财，大吉大利';
+                redPacketForm.amount = '';
+                redPacketForm.count = '';
+                redPacketForm.recipientId = null;
+            } else {
+                // 单聊转账
+                redPacketForm.type = 'transfer';
+                redPacketForm.text = '转账给你';
+                redPacketForm.amount = '';
+            }
             isRedPacketModalOpen.value = true;
         };
 
         const confirmRedPacket = () => {
+            const chat = getCurrentChat();
             const amount = parseFloat(redPacketForm.amount);
+
             if (isNaN(amount) || amount <= 0) {
                 alert("请输入有效金额");
                 return;
             }
-
             if (props.taobaoData.balance < amount) {
                 alert("余额不足！");
                 return;
             }
 
-            props.taobaoData.balance = parseFloat((props.taobaoData.balance - amount).toFixed(2));
+            // 群聊红包逻辑
+            if (chat.isGroup) {
+                const count = parseInt(redPacketForm.count);
+                if (redPacketTab.value === 'lucky') {
+                    if (isNaN(count) || count <= 0) {
+                        alert("请输入有效的红包个数");
+                        return;
+                    }
+                    if (amount / count < 0.01) {
+                        alert("单个红包金额不能少于0.01");
+                        return;
+                    }
+                } else if (redPacketTab.value === 'exclusive') {
+                    if (!redPacketForm.recipientId) {
+                        alert("请选择专属红包的接收人");
+                        return;
+                    }
+                }
+                
+                props.taobaoData.balance = parseFloat((props.taobaoData.balance - amount).toFixed(2));
+                const txt = redPacketForm.text || "恭喜发财，大吉大利";
+                
+                const newMsg = { 
+                    packetText: txt, 
+                    amount: redPacketForm.amount, 
+                    // 新增字段
+                    packetType: redPacketTab.value, // 'lucky' or 'exclusive'
+                    count: redPacketTab.value === 'lucky' ? count : 1,
+                    recipient: redPacketTab.value === 'exclusive' ? redPacketForm.recipientId : null,
+                    // 红包领取状态
+                    isReceived: false, // 仅用于单聊或自己是否领取
+                    claimedUsers: [], // 记录已领取用户 {id, name, amount}
+                    remainingAmount: amount,
+                    remainingCount: redPacketTab.value === 'lucky' ? count : 1,
+                    senderId: 'self', // 标记发送者
+                    aiHasReactedToPacket: false // AI 是否已响应过此红包
+                };
+                
+                pushMessage(chat, 'user', 'redpacket', `[红包] ${txt}`, newMsg);
+                
+                // AI 抢红包的逻辑已移至 triggerAIResponse 中，以确保在生成回复时触发，而不是立即触发
 
-            const chat = getCurrentChat();
-            if (redPacketForm.type === 'redpacket') {
-                 const txt = redPacketForm.text || "恭喜发财，大吉大利";
-                 pushMessage(chat, 'user', 'redpacket', `[红包] ${txt}`, { packetText: txt, amount: redPacketForm.amount });
-            } else {
-                 pushMessage(chat, 'user', 'transfer', `[转账] ¥${redPacketForm.amount}`, { amount: redPacketForm.amount });
+            } else { // 单聊转账逻辑
+                props.taobaoData.balance = parseFloat((props.taobaoData.balance - amount).toFixed(2));
+                pushMessage(chat, 'user', 'transfer', `[转账] ¥${redPacketForm.amount}`, { amount: redPacketForm.amount, isReceived: false });
             }
+
             isRedPacketModalOpen.value = false;
+        };
+
+        // 修改：AI 自动领取红包逻辑，增加交错延迟，使其更自然
+        const handleAiRedPacket = (chat, msg) => {
+            if (!chat.isGroup || msg.type !== 'redpacket' || msg.packetType !== 'lucky' || !msg.remainingCount || msg.remainingCount <= 0) return;
+
+            // 只有拼手气红包才会有 AI 参与
+            // 筛选出可以抢红包的 AI 成员
+            const potentialClaimers = chat.members.filter(m => !m.isSelf && m.id !== 'self' && m.id !== msg.senderId);
+            
+            // 打乱顺序，随机化谁先抢
+            potentialClaimers.sort(() => Math.random() - 0.5);
+
+            let claimDelay = 500 + Math.random() * 1000; // 初始延迟
+
+            potentialClaimers.forEach(member => {
+                // 确保还有红包可抢，并且 AI "决定" 抢 (80% 概率)
+                if (msg.remainingCount > 0 && Math.random() > 0.2) {
+                    
+                    setTimeout(() => {
+                        // 在延迟后再次检查，防止多个 timeout 同时抢最后一个红包
+                        if (msg.remainingCount <= 0) return;
+
+                        // 计算领取金额
+                        let claimedAmount = 0;
+                        if (msg.remainingCount === 1) {
+                            // 最后一个红包，拿走所有剩余金额
+                            claimedAmount = msg.remainingAmount;
+                        } else {
+                            // 随机分配金额
+                            const min = 0.01;
+                            const max = msg.remainingAmount - (min * (msg.remainingCount - 1));
+                            claimedAmount = parseFloat((Math.random() * (max - min) + min).toFixed(2));
+                        }
+                        
+                        // 更新红包状态
+                        msg.remainingAmount = parseFloat((msg.remainingAmount - claimedAmount).toFixed(2));
+                        msg.remainingCount--;
+                        if (!msg.claimedUsers) msg.claimedUsers = [];
+                        msg.claimedUsers.push({
+                            id: member.id,
+                            name: member.groupNickname || member.name,
+                            avatar: member.avatar,
+                            amount: claimedAmount.toFixed(2)
+                        });
+
+                        // 发送系统提示
+                        pushMessage(chat, 'system', 'announcement_update', `${member.groupNickname || member.name} 领取了红包 ${claimedAmount.toFixed(2)}元`);
+
+                        // 更新该 AI 的钱包 (如果存在)
+                        const memberChat = props.qqData.chatList.find(c => c.id === member.id);
+                        if (memberChat) {
+                            if (!memberChat.generatedWallet) {
+                                memberChat.generatedWallet = reactive({ balance: '0.00', transactions: [], realtimeTransactions: [] });
+                            }
+                            const currentBalance = parseFloat(memberChat.generatedWallet.balance || 0);
+                            memberChat.generatedWallet.balance = (currentBalance + claimedAmount).toFixed(2);
+                            
+                            if (!memberChat.generatedWallet.realtimeTransactions) memberChat.generatedWallet.realtimeTransactions = [];
+                            memberChat.generatedWallet.realtimeTransactions.push({
+                                id: Date.now(),
+                                type: 'income',
+                                amount: claimedAmount.toFixed(2),
+                                description: '抢到红包',
+                                time: new Date().toLocaleString()
+                            });
+                        }
+
+                    }, claimDelay);
+
+                    // 为下一个 AI 增加延迟，实现交错效果
+                    claimDelay += 800 + Math.random() * 1500; // 间隔 0.8 到 2.3 秒
+                }
+            });
+        };
+
+        // 处理红包/转账点击
+        const handleRedPacketClick = (msg) => {
+            const chat = getCurrentChat();
+            const selfId = 'self'; // 假设自己的ID是'self'
+
+            // --- 单聊转账逻辑 ---
+            if (!chat.isGroup) {
+                if (msg.role === 'user') {
+                    alert(msg.isReceived ? "转账已被接收" : "等待对方领取...");
+                    return;
+                }
+                if (msg.isReceived) {
+                    alert("你已经领取过了");
+                    return;
+                }
+                if (confirm("要收款吗？")) {
+                    const amount = parseFloat(msg.amount);
+                    if (isNaN(amount)) return;
+                    props.taobaoData.balance = parseFloat((props.taobaoData.balance + amount).toFixed(2));
+                    if (!props.taobaoData.transactions) props.taobaoData.transactions = [];
+                    props.taobaoData.transactions.unshift({ id: Date.now(), type: 'income', description: '收到转账', amount: `+${amount.toFixed(2)}` });
+                    msg.isReceived = true;
+                    alert("已收款");
+                }
+                return;
+            }
+
+            // --- 群聊红包逻辑 ---
+            const alreadyClaimed = msg.claimedUsers && msg.claimedUsers.some(u => u.id === selfId);
+
+            // 如果是专属红包，但自己不是接收者
+            if (msg.packetType === 'exclusive' && msg.recipient !== selfId) {
+                if (msg.role === 'user') { // 如果是自己发的专属红包
+                     redPacketDetailsModal.msg = msg;
+                     redPacketDetailsModal.visible = true;
+                } else {
+                     alert("这是给别人的专属红包哦！");
+                }
+                return;
+            }
+            
+            // 如果红包领完了或者自己已经领过了，直接打开详情
+            if (msg.remainingCount <= 0 || alreadyClaimed) {
+                redPacketDetailsModal.msg = msg;
+                redPacketDetailsModal.visible = true;
+                return;
+            }
+
+            // --- 领取红包逻辑 ---
+            let claimedAmount = 0;
+            if (msg.packetType === 'lucky') {
+                if (msg.remainingCount === 1) {
+                    claimedAmount = msg.remainingAmount;
+                } else {
+                    const min = 0.01;
+                    const max = msg.remainingAmount - (min * (msg.remainingCount - 1));
+                    claimedAmount = parseFloat((Math.random() * (max - min) + min).toFixed(2));
+                }
+            } else { // exclusive
+                claimedAmount = msg.remainingAmount;
+            }
+            
+            // 更新红包状态
+            msg.remainingAmount = parseFloat((msg.remainingAmount - claimedAmount).toFixed(2));
+            msg.remainingCount--;
+            if (!msg.claimedUsers) msg.claimedUsers = [];
+            msg.claimedUsers.push({
+                id: selfId,
+                name: chat.userGroupNickname || props.qqData.selfName || '我',
+                avatar: props.qqData.selfAvatar,
+                amount: claimedAmount.toFixed(2)
+            });
+
+            // 更新余额
+            props.taobaoData.balance = parseFloat((props.taobaoData.balance + claimedAmount).toFixed(2));
+            if (!props.taobaoData.transactions) props.taobaoData.transactions = [];
+            props.taobaoData.transactions.unshift({ id: Date.now(), type: 'income', description: '收到红包', amount: `+${claimedAmount.toFixed(2)}` });
+
+            // 发送系统提示 (让AI知道我领了多少)
+            const myName = chat.userGroupNickname || props.qqData.selfName || '我';
+            pushMessage(chat, 'system', 'announcement_update', `${myName} 领取了红包 ${claimedAmount.toFixed(2)}元`);
+
+            // 打开详情弹窗
+            redPacketDetailsModal.msg = msg;
+            redPacketDetailsModal.visible = true;
         };
 
         const sendVoice = () => {
@@ -623,6 +1384,107 @@ const addBatchStickers = () => {
 
 
         // --- AI 逻辑 (含表情包解析) ---
+        const processGroupMessages = (chat, messages, baseUrl) => {
+            if (messages.length === 0) {
+                props.qqData.isSending = false;
+                props.qqData.sendingChatId = null;
+                
+                if (chat.enableSummary && chat.summaryMode === 'auto') {
+                    if (chat.msgCountSinceSummary >= chat.summaryTriggerCount) {
+                        generateSummary(chat, baseUrl, props.apiConfig.key, props.apiConfig.model);
+                    }
+                }
+                return;
+            }
+
+            const currentMsg = messages.shift();
+            
+            // 检查是否包含内嵌表情包标签 [表情包:xxx]
+            // 如果包含，且不是整条消息就是表情包，则需要拆分
+            const stickerRegex = /(\[表情包[:：][^\]]+\])/g;
+            if (stickerRegex.test(currentMsg.content) && !/^\[表情包[:：][^\]]+\]$/.test(currentMsg.content.trim())) {
+                const parts = currentMsg.content.split(stickerRegex).filter(p => p.trim());
+                // 将拆分后的部分转换回消息对象，插入到队列头部
+                const newMsgs = parts.map(part => ({
+                    ...currentMsg,
+                    content: part
+                }));
+                messages.unshift(...newMsgs);
+                // 重新处理
+                processGroupMessages(chat, messages, baseUrl);
+                return;
+            }
+
+            // 计算延迟，群聊可能需要稍微快一点，或者根据内容长度
+            const typingTime = 600 + (currentMsg.content.length * 20) + (Math.random() * 300);
+
+            setTimeout(() => {
+                let type = 'text';
+                let extra = { 
+                    customName: currentMsg.name, 
+                    customAvatar: currentMsg.avatar 
+                };
+                let content = currentMsg.content;
+
+                // 简单的指令解析 (支持图片和表情包)
+                // 解析引用
+                const quoteMatch = content.match(/^\[引用[:：]([^:：]+)[:：]([^\]]+)\]/);
+                if (quoteMatch) {
+                    extra.quote = {
+                        name: quoteMatch[1],
+                        content: quoteMatch[2]
+                    };
+                    content = content.replace(quoteMatch[0], '').trim();
+                }
+
+                if (content.startsWith('[图片]')) {
+                    type = 'image';
+                    const desc = content.replace('[图片]', '').trim();
+                    extra.imgType = 'desc';
+                    extra.description = desc;
+                } else if (content.startsWith('[表情包')) {
+                    type = 'sticker';
+                    let val = '';
+                    const match = content.match(/^\[表情包[:：]([^\]]+)\]/);
+                    if (match && match[1]) {
+                        val = match[1].trim();
+                    } else {
+                        val = content.replace('[表情包]', '').trim();
+                    }
+
+                    // 查找表情包
+                    let found = chat.aiExclusiveStickers ? chat.aiExclusiveStickers.find(s => s.name === val) : null;
+                    if (!found) {
+                        found = props.qqData.aiGeneralStickers ? props.qqData.aiGeneralStickers.find(s => s.name === val) : null;
+                    }
+
+                    if (found) {
+                        extra.src = found.src;
+                    } else {
+                        // 找不到表情包，回退为文本
+                        type = 'text';
+                    }
+                } else if (content.startsWith('[链接')) {
+                    type = 'link';
+                    const match = content.match(/^\[链接[:：]([^|\]]*)\|?([^\]]*)\]([\s\S]*)/);
+                    if (match) {
+                        const title = match[1].trim() || '分享链接';
+                        const source = match[2].trim();
+                        const linkContent = match[3].trim();
+                        content = `[链接] ${title}`;
+                        extra.linkData = {
+                            title: title,
+                            source: source,
+                            content: linkContent
+                        };
+                    }
+                }
+
+                pushMessage(chat, 'assistant', type, content, extra);
+                processGroupMessages(chat, messages, baseUrl);
+            }, typingTime);
+        };
+
         const processSequentialMessages = (chat, parts, baseUrl, finalStatus) => {
             if (parts.length === 0) {
                 props.qqData.isSending = false;
@@ -631,6 +1493,31 @@ const addBatchStickers = () => {
                 if (finalStatus) {
                     chat.status = finalStatus;
                 }
+                
+                // AI 自动领取红包/转账逻辑 (在回复完成后执行)
+                const unreceivedMsg = [...chat.messages].reverse().find(m => m.role === 'user' && (m.type === 'redpacket' || m.type === 'transfer') && !m.isReceived);
+                if (unreceivedMsg) {
+                    setTimeout(() => {
+                        const amt = parseFloat(unreceivedMsg.amount);
+                        if (!chat.generatedWallet) {
+                            chat.generatedWallet = reactive({ balance: '0.00', transactions: [], realtimeTransactions: [] });
+                        }
+                        const currentBalance = parseFloat(chat.generatedWallet.balance || 0);
+                        chat.generatedWallet.balance = (currentBalance + amt).toFixed(2);
+                        
+                        if (!chat.generatedWallet.realtimeTransactions) chat.generatedWallet.realtimeTransactions = [];
+                        chat.generatedWallet.realtimeTransactions.push({
+                            id: Date.now(),
+                            type: 'income',
+                            amount: amt.toFixed(2),
+                            description: unreceivedMsg.type === 'redpacket' ? '收到红包' : '收到转账',
+                            time: new Date().toLocaleString()
+                        });
+
+                        unreceivedMsg.isReceived = true;
+                    }, 1000); // 回复完1秒后领取
+                }
+
                 if (chat.enableSummary && chat.summaryMode === 'auto') {
                     if (chat.msgCountSinceSummary >= chat.summaryTriggerCount) {
                         generateSummary(chat, baseUrl, props.apiConfig.key, props.apiConfig.model);
@@ -641,6 +1528,19 @@ const addBatchStickers = () => {
             }
 
             const currentMsgContent = parts.shift();
+
+            // 检查是否包含内嵌表情包标签 [表情包:xxx]
+            // 如果包含，且不是整条消息就是表情包，则需要拆分
+            const stickerRegex = /(\[表情包[:：][^\]]+\])/g;
+            if (stickerRegex.test(currentMsgContent) && !/^\[表情包[:：][^\]]+\]$/.test(currentMsgContent.trim())) {
+                const subParts = currentMsgContent.split(stickerRegex).filter(p => p.trim());
+                // 将拆分后的部分插入到队列头部
+                parts.unshift(...subParts);
+                // 重新处理
+                processSequentialMessages(chat, parts, baseUrl, finalStatus);
+                return;
+            }
+
             const typingTime = 800 + (currentMsgContent.length * 30) + (Math.random() * 400);
 
             setTimeout(() => {
@@ -648,13 +1548,33 @@ const addBatchStickers = () => {
                 let extra = {};
                 let content = currentMsgContent;
 
+                // 智能修正：如果内容仅仅是表情包的名字（可能带有标点），自动转换为表情包指令
+                const cleanText = content.trim();
+                let foundSticker = null;
+                if (chat.aiExclusiveStickers) foundSticker = chat.aiExclusiveStickers.find(s => s.name === cleanText);
+                if (!foundSticker && props.qqData.aiGeneralStickers) foundSticker = props.qqData.aiGeneralStickers.find(s => s.name === cleanText);
+                
+                if (foundSticker && !content.startsWith('[表情包')) {
+                    content = `[表情包:${foundSticker.name}]`;
+                }
+
+                // 解析引用
+                const quoteMatch = content.match(/^\[引用[:：]([^:：]+)[:：]([^\]]+)\]/);
+                if (quoteMatch) {
+                    extra.quote = {
+                        name: quoteMatch[1],
+                        content: quoteMatch[2]
+                    };
+                    content = content.replace(quoteMatch[0], '').trim();
+                }
+
                 // 禁止所有 [] 形式的表情（如 [大笑]、[哭泣]、[doge] 等）
                 // 只保留允许的功能型指令（如 [语音]、[红包]、[转账]、[图片]、[位置]、[表情包:xxx]）
                 // 其它 [] 形式的内容直接过滤掉，不显示
                 const allowedDirectives = [
                     /^\[语音\]/,
-                    /^\[红包\]/,
-                    /^\[转账\]/,
+                    /^\[红包[:：\]]/,
+                    /^\[转账[:：\]]/,
                     /^\[图片\]/,
                     /^\[位置\]/,
                     /^\[表情包[:：][^\]]+\]/,
@@ -673,14 +1593,92 @@ const addBatchStickers = () => {
                     type = 'voice';
                     const text = content.replace('[语音]', '').trim();
                     extra = { voiceText: text, duration: Math.max(1, Math.ceil(text.length / 3)), isVoiceTextVisible: false };
-                } else if (content.startsWith('[红包]')) {
-                    type = 'redpacket';
-                    const text = content.replace('[红包]', '').trim();
-                    extra = { packetText: text || "恭喜发财" };
-                } else if (content.startsWith('[转账]')) {
-                    type = 'transfer';
-                    const amount = content.replace(/[^\d.]/g, ''); 
-                    extra = { amount: amount || '???' };
+                } else if (content.startsWith('[红包')) {
+                    // 解析红包金额和文本
+                    let amount = 0;
+                    let text = "恭喜发财";
+                    
+                    // 尝试解析 [红包:金额]文本
+                    const match = content.match(/^\[红包[:：](\d+(\.\d+)?)\](.*)/);
+                    if (match) {
+                        amount = parseFloat(match[1]);
+                        text = match[3].trim() || "恭喜发财";
+                    } else {
+                        // 旧格式兼容：[红包]文本 -> 默认扣除随机金额 1-10元
+                        text = content.replace('[红包]', '').trim() || "恭喜发财";
+                        amount = Math.floor(Math.random() * 10) + 1;
+                    }
+
+                    // 检查余额
+                    if (!chat.generatedWallet) {
+                        chat.generatedWallet = reactive({ balance: '0.00', transactions: [], realtimeTransactions: [] });
+                    }
+                    const currentBalance = parseFloat(chat.generatedWallet.balance || 0);
+
+                    if (currentBalance >= amount) {
+                        // 余额充足，扣款
+                        chat.generatedWallet.balance = (currentBalance - amount).toFixed(2);
+                        if (!chat.generatedWallet.realtimeTransactions) chat.generatedWallet.realtimeTransactions = [];
+                        chat.generatedWallet.realtimeTransactions.push({
+                            id: Date.now(),
+                            type: 'expense',
+                            amount: amount.toFixed(2),
+                            description: '发红包',
+                            time: new Date().toLocaleString()
+                        });
+
+                        type = 'redpacket';
+                        extra = { packetText: text, amount: amount.toFixed(2), isReceived: false };
+                    } else {
+                        // 余额不足，替换为文本回复
+                        type = 'text';
+                        content = "囊中羞涩，发不出红包了...";
+                        extra = {};
+                    }
+
+                } else if (content.startsWith('[转账')) {
+                    // 解析转账金额
+                    let amount = 0;
+                    
+                    // 尝试解析 [转账:金额]
+                    const match = content.match(/^\[转账[:：](\d+(\.\d+)?)\]/);
+                    if (match) {
+                        amount = parseFloat(match[1]);
+                    } else {
+                        // 旧格式兼容：[转账]金额
+                        const numStr = content.replace(/[^\d.]/g, '');
+                        amount = parseFloat(numStr) || 0;
+                    }
+
+                    if (amount <= 0) amount = 100; // 默认值兜底
+
+                    // 检查余额
+                    if (!chat.generatedWallet) {
+                        chat.generatedWallet = reactive({ balance: '0.00', transactions: [], realtimeTransactions: [] });
+                    }
+                    const currentBalance = parseFloat(chat.generatedWallet.balance || 0);
+
+                    if (currentBalance >= amount) {
+                        // 余额充足，扣款
+                        chat.generatedWallet.balance = (currentBalance - amount).toFixed(2);
+                        if (!chat.generatedWallet.realtimeTransactions) chat.generatedWallet.realtimeTransactions = [];
+                        chat.generatedWallet.realtimeTransactions.push({
+                            id: Date.now(),
+                            type: 'expense',
+                            amount: amount.toFixed(2),
+                            description: '转账',
+                            time: new Date().toLocaleString()
+                        });
+
+                        type = 'transfer';
+                        extra = { amount: amount.toFixed(2), isReceived: false };
+                    } else {
+                        // 余额不足，替换为文本回复
+                        type = 'text';
+                        content = "余额不足，转账失败...";
+                        extra = {};
+                    }
+
                 } else if (content.startsWith('[图片]')) {
                     type = 'image';
                     const desc = content.replace('[图片]', '').trim();
@@ -739,26 +1737,45 @@ const addBatchStickers = () => {
         };
 
 // 新增：將 AI 回覆強制按標點分段（標點後必分下一則），並保留 ||| 分段
+// 修正：增加對 [表情包:...] 和 [引用:...] 標籤的保護，防止標籤內的標點符號導致錯誤分段
 const splitAiContentToParts = (raw) => {
-	if (!raw) return [];
-	let text = String(raw).trim();
-	// 若用戶已用 ||| 指定分段，優先尊重
-	if (text.includes('|||')) {
-		return text.split('|||').map(s => s.trim()).filter(Boolean);
-	}
-	// 以各種標點為邊界切分（包含中文/英文句尾標點與逗號）
-	// 保留標點在前段末尾，但排除连续的英文点号（如 ...）
-	const segs = text.split(/(?<=[。！？?!，,、;；])|(?<=\.)(?!\.)/g).map(s => s.trim()).filter(Boolean);
-	
-	// 將所有逗號、頓號、分號結尾的分段改為句號結尾
-	return segs.map(seg => {
-		// 檢查是否以逗號、頓號或分號結尾
-		if (/[，,、;；]$/.test(seg)) {
-			// 替換末尾的標點為句號
-			return seg.replace(/[，,、;；]$/, '。');
-		}
-		return seg;
-	});
+    if (!raw) return [];
+    let text = String(raw).trim();
+
+    // 1. 保護標籤：將表情包和引用標籤替換為佔位符
+    const tags = [];
+    const tagRegex = /(\[表情包[:：][^\]]+\]|\[引用[:：][^\]]+\])/g;
+    const placeholderText = text.replace(tagRegex, (match) => {
+        tags.push(match);
+        return `__TAG_${tags.length - 1}__`;
+    });
+
+    // 2. 分段：對帶有佔位符的文本進行分段
+    let parts;
+    if (placeholderText.includes('|||')) {
+        // 優先尊重用戶自定義的 ||| 分段
+        parts = placeholderText.split('|||').map(s => s.trim()).filter(Boolean);
+    } else {
+        // 按標點符號分段 (智能分句：僅在句號、問號、感嘆號、換行符後分段，不再在逗號處切斷)
+        const segs = placeholderText.split(/(?<=[。！？?!\n])(?![。！？?!\n])|(?<=\.)(?!\.|\d)/g).map(s => s.trim()).filter(Boolean);
+        
+        // 將逗號、頓號、分號結尾的分段改為句號結尾
+        parts = segs.map(seg => {
+            if (/[，,、;；]$/.test(seg)) {
+                return seg.replace(/[，,、;；]$/, '。');
+            }
+            return seg;
+        });
+    }
+
+    // 3. 還原標籤
+    if (tags.length === 0) {
+        return parts;
+    }
+    const placeholderRestoreRegex = /__TAG_(\d+)__/g;
+    return parts.map(part => 
+        part.replace(placeholderRestoreRegex, (match, index) => tags[parseInt(index)])
+    );
 };
 
 // 新增：在展示訊息前生成一段隱形思考（改為本地模擬延遲，避免二次 API 呼叫）
@@ -787,22 +1804,80 @@ const generateHiddenThought = async (chat, baseUrl) => {
             }
 
             const chat = props.qqData.chatList.find(c => c.id === props.qqData.currentChatId);
+            
+            // 新增：在 AI 回应前，检查是否有用户发的红包，并触发 AI 领取
+            if (chat.isGroup) {
+                const unreactedPacket = chat.messages.find(m => 
+                    m.role === 'user' && 
+                    m.type === 'redpacket' && 
+                    m.packetType === 'lucky' &&
+                    m.remainingCount > 0 &&
+                    !m.aiHasReactedToPacket
+                );
+                if (unreactedPacket) {
+                    unreactedPacket.aiHasReactedToPacket = true; // 标记为已处理，防止重复触发
+                    handleAiRedPacket(chat, unreactedPacket); // 调用交错领取红包的函数
+                }
+            }
+
             // 新增：当 AI 准备回应时，强制设为在线状态
             chat.status = 'online';
             props.qqData.isSending = true; 
             props.qqData.sendingChatId = chat.id;
             try {
-                let systemPrompt = `你扮演：${chat.name}。${chat.gender !== '未知' ? '性别：'+chat.gender+'。' : ''}`;
-                if (chat.remark && chat.remark !== chat.name) systemPrompt += `用户对你的备注是：${chat.remark}。`;
-                if (chat.aiPersona) systemPrompt += `\n你的详细人设：${chat.aiPersona}`;
-                if (chat.userPersona) systemPrompt += `\n对话用户（我）的设定：${chat.userPersona}`;
+                let systemPrompt = "";
+                if (chat.isGroup) {
+                    systemPrompt = `【指令：真实群聊模拟】
+你正在模拟一个名为“${chat.name}”的群聊。
+群成员列表：
+`;
+                    if (chat.members) {
+                        chat.members.forEach(m => {
+                            const titleInfo = m.title ? ` (群头衔: ${m.title})` : '';
+                            // 新增：注入群昵称信息
+                            const nicknameInfo = m.groupNickname ? ` (群昵称: ${m.groupNickname})` : '';
+                            systemPrompt += `- ${m.name}${nicknameInfo}${titleInfo}: ${m.persona}\n`;
+                        });
+                    }
+                    systemPrompt += `\n用户（我）的设定：${chat.userPersona || '无'}\n`;
+                    if (chat.userGroupNickname) systemPrompt += `用户（我）在群里的昵称是：${chat.userGroupNickname}。\n`;
+                } else {
+                    systemPrompt = `你扮演：${chat.name}。${chat.gender !== '未知' ? '性别：'+chat.gender+'。' : ''}`;
+                    if (chat.remark && chat.remark !== chat.name) systemPrompt += `用户对你的备注是：${chat.remark}。`;
+                    if (chat.aiPersona) systemPrompt += `\n你的详细人设：${chat.aiPersona}`;
+                    if (chat.userPersona) systemPrompt += `\n对话用户（我）的设定：${chat.userPersona}`;
 
-                // 注入 NPC 列表
-                if (chat.npcList && chat.npcList.length > 0) {
-                    systemPrompt += `\n\n【已知 NPC/其他角色】：\n`;
-                    chat.npcList.forEach(npc => {
-                        systemPrompt += `[${npc.name}]: ${npc.setting || ''} (关系: ${npc.relation || '未知'})\n`;
-                    });
+                    // 注入 NPC 列表
+                    if (chat.npcList && chat.npcList.length > 0) {
+                        systemPrompt += `\n\n【已知 NPC/其他角色】：\n`;
+                        chat.npcList.forEach(npc => {
+                            systemPrompt += `[${npc.name}]: ${npc.setting || ''} (关系: ${npc.relation || '未知'})\n`;
+                        });
+                    }
+                }
+
+                // 注入钱包余额信息
+                let currentBalance = 0;
+                if (chat.generatedWallet && chat.generatedWallet.balance) {
+                    currentBalance = parseFloat(chat.generatedWallet.balance);
+                }
+                systemPrompt += `\n\n【钱包状态】：你当前的钱包余额为 ¥${currentBalance.toFixed(2)}。`;
+
+                // 注入可用表情包列表
+                const availableStickers = [];
+                if (chat.aiExclusiveStickers && chat.aiExclusiveStickers.length > 0) {
+                    availableStickers.push(...chat.aiExclusiveStickers.map(s => s.name));
+                }
+                if (props.qqData.aiGeneralStickers && props.qqData.aiGeneralStickers.length > 0) {
+                    availableStickers.push(...props.qqData.aiGeneralStickers.map(s => s.name));
+                }
+                
+                if (availableStickers.length > 0) {
+                    // 去重
+                    const uniqueStickers = [...new Set(availableStickers)];
+                    systemPrompt += `\n\n【可用表情包列表】：${uniqueStickers.join(', ')}。请在合适的情境下使用 [表情包:名称] 发送表情。`;
+                    systemPrompt += `\n**重要**：在使用表情包前，请务必思考是否符合你当前的人设。例如，一个冷淡、严肃或年长的角色，通常不应该使用过于活泼、可爱或搞怪的表情包。请根据你的性格设定谨慎选择。`;
+                    systemPrompt += `\n**【表情包格式铁律】**：\n1. 必须且只能使用 [表情包:名称] 的格式。\n2. 方括号、冒号、名称前后严禁出现任何空格。\n3. 严禁将表情包指令与其他文字混合在同一条消息中发送。如果你想在发送表情包的同时说话，请务必分开发送。\n错误示范：\n- “好的[表情包:同意]”\n- “[表情包: 思考]”\n正确示范：\n1. 发送第一条消息：“好的”\n2. 发送第二条消息：[表情包:同意]`;
                 }
                 
                 // 注入世界书内容
@@ -854,47 +1929,114 @@ const generateHiddenThought = async (chat, baseUrl) => {
                 }
 
                 // === 这里加入强约束 ===
+                if (chat.isGroup) {
+                    systemPrompt += `
+【核心任务】
+根据上下文，让群成员自然地接话。
+
+【严格约束】
+1. **消息数量**：请生成 **4 到 8条** 消息。宁缺毋滥，如果话题结束或没人想说话，可以只发 1-2 条甚至不发。
+2. **防刷屏**：同一个角色 **最多连续发送 2 条** 消息。
+3. **话题控制**：
+   - **严禁擅自开启新话题**。必须紧扣上一条消息的内容进行回复。
+   - 如果当前话题已经聊死，就自然停止，不要强行找话题。
+4. **角色扮演**：
+   - 只有对当前话题感兴趣的角色才会发言。
+   - 语气必须极度口语化、简短，像真实的朋友聊天。
+5. **格式要求**：
+   - 每行一条消息，格式严格为：[角色名]: 内容
+   - 角色名必须完全匹配群成员列表中的名字（或群昵称）。优先使用群昵称。
+   - 例如：
+     [张三]: 卧槽真的假的？
+     [李四]: 哈哈哈哈笑死我了
+6. **特殊指令**：
+   - 如果想发表情包或图片，格式保持不变，如：[张三]: [图片]xxx 或 [李四]: [表情包:xxx]
+`;
+                }
+
                 systemPrompt += `
 【重要规则】：
 - 禁止输出任何 [xxx] 形式的文本表情（如[大笑][doge][哭泣][偷笑]等），只允许以下格式：
   1. [语音]xxx
-  2. [红包]xxx
-  3. [转账]xxx
-  4. [图片]xxx
-  5. [位置]xxx
-  6. [表情包:xxx]（仅限于当前可用表情包名称）
-  7. [链接:标题|来源]内容 (来源可选, 如 [链接:文章标题|微博]这是内容)
+`;
+                if (chat.isGroup) {
+                    systemPrompt += `  2. [红包:金额]祝福语 (例如: [红包:20]大吉大利) - 必须指定金额，且不能超过当前余额。注意：群聊中禁止使用转账指令。\n`;
+                } else {
+                    systemPrompt += `  2. [转账:金额] (例如: [转账:500]) - 必须指定金额，且不能超过当前余额。注意：单聊中禁止使用红包指令。\n`;
+                }
+                systemPrompt += `  3. [图片]xxx
+  4. [位置]xxx
+  5. [表情包:xxx]（仅限于当前可用表情包名称）
+  6. [链接:标题|来源]内容 (来源可选, 如 [链接:文章标题|微博]这是内容)
+  7. [引用:名字:内容] (例如: [引用:张三:你好]回复内容) - 用于回复特定消息
+- **关于金钱**：如果你的余额不足以支付你想发的金额，**绝对不要**发送指令。请直接用符合你人设的自然口吻回复说没钱了（例如“刚花完”、“等发工资吧”、“最近手头紧”等）。**严禁使用括号**来描述动作或状态（如“（查看余额）”、“（尴尬）”等），直接说出来。
 - 其它所有 [xxx] 形式的内容都禁止出现，遇到想表达情绪时请用自然语言或 emoji。
 `;
 
                 // 強制要求在同一回覆尾端輸出心聲 JSON（同次回覆，不要另起請求）
-                systemPrompt += `
+                // 仅在单聊模式下启用心声生成
+                if (!chat.isGroup) {
+                    systemPrompt += `
 【心声生成】：在主回覆结束后，务必紧接输出一行标记 ---HEART_JSON---，随后直接输出一个纯 JSON 物件（不包含其他文字），格式如下：
 ---HEART_JSON---
 {"clothing":"...","behavior":"...","thought":"...","evil":"..."}
 要求：
 - 每个字段用第一人称中文（简体），长度 40 到 80 字（含），基于当前 AI 人设、玩家设定和近期对话，风格不可模板化；
 - evil 表示想对 user 做的“坏坏”举动或心思（可调皮/暧昧，但不得违法或含露骨性暗示）；
-- 只能输出该 JSON 物件，且不得输出额外説明或多余文本（若不符合格式，会以本地合成 fallback 生成心声）。
+- 只能输出该 JSON 物件，且不得输出额外説明或多余文本。
 `;
+                }
 
                 const limit = chat.contextLimit || 10;
-                const validMessages = chat.messages.filter(m => !m.isRetracted && m.type !== 'forwarded');
+                const validMessages = chat.messages.filter(m => !m.isRetracted);
                 const contextMessages = [
                     { role: "system", content: systemPrompt },
                     ...validMessages.slice(-limit).map(m => {
+                        let content = m.content;
+
+                        // 新增：处理链接和转发消息，将其内容格式化为文本
+                        if (m.type === 'link' && m.linkData) {
+                            content = `[链接:${m.linkData.title || ''}|${m.linkData.source || ''}]${m.linkData.content || ''}`;
+                        } else if (m.type === 'forwarded' && m.forwardData) {
+                            const fwdList = m.forwardData.list.map(fwdMsg => `${fwdMsg.name}: ${fwdMsg.content}`).join('\n');
+                            content = `[聊天记录: ${m.forwardData.title}]\n---\n${fwdList}\n---`;
+                        } else if (m.type === 'moment_share' && m.momentData) {
+                            const mo = m.momentData;
+                            let commentText = "";
+                            if (mo.comments && mo.comments.length > 0) {
+                                commentText = "\n【评论区】:\n" + mo.comments.map(c => `${c.author}: ${c.content}`).join('\n');
+                            }
+                            content = `[分享了一条动态]\n作者：${mo.author.name}\n内容：${mo.content}${commentText}`;
+                            
+                            // 如果有图片，将第一张图作为视觉输入
+                            if (mo.images && mo.images.length > 0) {
+                                return {
+                                    role: m.role,
+                                    content: [
+                                        { type: "text", text: content },
+                                        { type: "image_url", image_url: { url: mo.images[0] } }
+                                    ]
+                                };
+                            }
+                        }
+
+                        // 如果有引用，将引用内容拼接到消息前面，让 AI 理解上下文
+                        if (m.quote) {
+                            content = `「引用 ${m.quote.name}: ${m.quote.content}」\n${content}`;
+                        }
+
                         // 如果是图片消息且有 src (本地图片/压缩图片)
                         if (m.type === 'image' && m.imgType === 'local' && m.src) {
                             return {
                                 role: m.role,
                                 content: [
-                                    { type: "text", text: m.content || "发送了一张图片" },
+                                    { type: "text", text: content || "发送了一张图片" },
                                     { type: "image_url", image_url: { url: m.src } }
                                 ]
                             };
                         }
                         // 普通文本消息
-                        return { role: m.role, content: m.content };
+                        return { role: m.role, content: content };
                     })
                 ];
 
@@ -919,151 +2061,177 @@ const generateHiddenThought = async (chat, baseUrl) => {
                 const data = await res.json();
                 let aiRawContent = (data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content) ? data.choices[0].message.content : '';
 
-                // 嘗試從同次回覆中抽出心聲 JSON（AI 須在主回覆後輸出 ---HEART_JSON--- 與 JSON）
-                const heartMarker = '---HEART_JSON---';
-                let parsedHeart = null;
-                if (aiRawContent.includes(heartMarker)) {
-                    const parts = aiRawContent.split(heartMarker);
-                    // 保留主回覆供展示
-                    aiRawContent = parts[0].trim();
-                    const jsonPart = parts.slice(1).join(heartMarker).trim();
-                    // 先嘗試直接 parse，失敗時抓第一個 {...} 嘗試解析
-                    try {
-                        parsedHeart = JSON.parse(jsonPart);
-                    } catch (e) {
-                        const m = jsonPart.match(/\{[\s\S]*\}/);
-                        if (m) {
-                            try { parsedHeart = JSON.parse(m[0]); } catch (e2) { parsedHeart = null; }
-                        }
-                    }
-                }
-
-                // 新增：檢查 parsedHeart 是否有效（每欄 40-80 字）
-                const isValidHeart = (h) => {
-                    if (!h) return false;
-                    const keys = ['clothing','behavior','thought','evil'];
-                    for (const k of keys) {
-                        if (!h[k] || typeof h[k] !== 'string') return false;
-                        const len = h[k].replace(/\s+/g, '').length; // 粗略字數（去空白）
-                        if (len < 40 || len > 80) return false;
-                    }
-                    return true;
-                };
-
-                // 新增：本地合成心聲（用於 parsedHeart 無效時，且不呼叫第二次模型）
-                const synthesizeHeartFromContext = (chat, recentAiText) => {
-                    const aiPersona = chat.aiPersona || '';
-                    const userPersona = chat.userPersona || '';
-                    const name = chat.name || '对方';
+                if (chat.isGroup) {
+                    // --- 群聊处理逻辑 ---
                     
-                    // 获取最近的用户消息
-                    const lastUserMsg = (chat.messages && [...chat.messages].reverse().find(m => m.role === 'user'))?.content || '';
+                    // 1. 预处理：强制在“角色名:”前换行，防止多条回复挤在一行
+                    // 构建群成员名字的正则部分，用于识别 (包含本名和群昵称)
+                    const memberNames = chat.members ? chat.members.flatMap(m => [m.name, m.groupNickname].filter(Boolean)).map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') : '';
+                    if (memberNames) {
+                        // 匹配 [角色名]: 或 角色名: (前面是行首或空白)
+                        // 使用 lookbehind 确保不破坏前面的内容，或者简单地替换
+                        // 这里简单地将 " 角色名:" 替换为 "\n角色名:"
+                        const nameRegex = new RegExp(`(\\s|^|\\])(\\[?(${memberNames})\\]?[:：])`, 'g');
+                        aiRawContent = aiRawContent.replace(nameRegex, '$1\n$2');
+                    }
+
+                    const lines = aiRawContent.split('\n').map(l => l.trim()).filter(l => l);
+                    const groupMessages = [];
                     
-                    // 字数控制函数（40-80字）
-                    const ensureLength = (text) => {
-                        let result = text.trim();
-                        if (result.length < 40) {
-                            // 太短就补充自然的延伸
-                            const extensions = [
-                                '这让我有些在意。',
-                                '我不确定该怎么回应。',
-                                '这种感觉有点微妙。',
-                                '我需要想想怎么说。'
-                            ];
-                            while (result.length < 40) {
-                                result += extensions[Math.floor(Math.random() * extensions.length)];
+                    lines.forEach(line => {
+                        // 匹配 [角色名]: 内容 或 角色名: 内容
+                        // 支持可选的方括号
+                        const match = line.match(/^\[?([^\]:：]+)\]?[:：](.*)/);
+                        
+                        if (match) {
+                            const name = match[1].trim();
+                            const rawContent = match[2].trim();
+                            
+                            // 查找成员头像 (严格验证角色名是否在群成员列表中，支持本名和群昵称)
+                            const member = chat.members.find(m => m.name === name || m.groupNickname === name);
+                            
+                            if (member) {
+                                // 防止 AI 扮演玩家
+                                if (member.isSelf || member.id === 'self') return;
+
+                                const avatar = member.avatar;
+                                if (rawContent) {
+                                    // 对内容进行分段处理
+                                    const parts = splitAiContentToParts(rawContent);
+                                    if (parts.length > 0) {
+                                        parts.forEach(part => {
+                                            groupMessages.push({
+                                                name,
+                                                avatar,
+                                                content: part
+                                            });
+                                        });
+                                    } else {
+                                        groupMessages.push({
+                                            name,
+                                            avatar,
+                                            content: rawContent
+                                        });
+                                    }
+                                }
+                            } else {
+                                // 如果名字匹配但不是群成员，可能是误判或系统消息，追加到上一条
+                                if (groupMessages.length > 0) {
+                                    groupMessages[groupMessages.length - 1].content += '\n' + line;
+                                }
+                            }
+                        } else {
+                            // 如果没有匹配到格式，但有内容，追加到上一条消息
+                            if (groupMessages.length > 0) {
+                                groupMessages[groupMessages.length - 1].content += '\n' + line;
                             }
                         }
-                        if (result.length > 80) {
-                            result = result.slice(0, 80);
-                            const lastPeriod = result.lastIndexOf('。');
-                            if (lastPeriod > 30) result = result.slice(0, lastPeriod + 1);
-                        }
-                        return result;
-                    };
+                    });
 
-                    // 衣着描述（不使用AI回复内容，基于人设或随机生成）
-                    const clothingVariants = [
-                        '我穿着一件宽松的卫衣，袖口有些磨损痕迹，显得很随意。头发随意扎着，没有刻意打理。',
-                        '今天穿的是简单的T恤和牛仔裤，衣领有点歪，袖子卷到手肘。看起来挺休闲的。',
-                        '我套了件深色外套，里面是白衬衫，衣角微微皱着。整体给人一种不太在意外表的感觉。',
-                        '穿着件毛衣，领口松松垮垮的，袖子被我撸到了手臂。头发有点乱，但我不太在意。'
-                    ];
-                    const clothing = aiPersona.includes('衣') || aiPersona.includes('穿') 
-                        ? ensureLength(`我${aiPersona.slice(0, 60)}。从镜子里看，自己的样子似乎还算说得过去。`)
-                        : clothingVariants[Math.floor(Math.random() * clothingVariants.length)];
-
-                    // 行为描述（基于最近对话和人设）
-                    const behaviorVariants = [
-                        `刚才${lastUserMsg ? '听你说那些话' : '和你聊天'}的时候，我的手指不自觉地在桌上轻敲。眼神有点游移，不太敢直视屏幕。`,
-                        `我回复的时候有点犹豫，打了又删，删了又打。最后还是发出去了，但心里有点忐忑。`,
-                        `说话的语气听起来很平静，但其实我的心跳有点快。手机拿在手里，掌心微微出汗。`,
-                        `我故意放慢了打字速度，不想显得太急切。时不时瞄一眼你的头像，想猜你在想什么。`
-                    ];
-                    const behavior = ensureLength(behaviorVariants[Math.floor(Math.random() * behaviorVariants.length)]);
-
-                    // 心声（第一视角，可以是吐槽、情绪、想法等）
-                    const thoughtVariants = [
-                        lastUserMsg ? `${name}说"${lastUserMsg.slice(0, 15)}"的时候，我心里其实有点慌。不知道该怎么接话才不会显得太刻意。` : `和${name}聊天总让我有种说不清的感觉。想靠近，但又怕说错话。`,
-                        `我承认，刚才看到你的消息时心里咯噔一下。不知道是期待还是紧张，可能两者都有吧。`,
-                        userPersona ? `你是${userPersona.slice(0, 20)}，这让我觉得有点难以捉摸。我在想，你会怎么看待我呢？` : `说实话，我有点搞不懂你的想法。每次聊天都像在猜谜，既刺激又让人不安。`,
-                        `我的心思其实挺复杂的。表面上看起来平静，但内心在反复权衡每一句话该怎么说。`
-                    ];
-                    const thought = ensureLength(thoughtVariants[Math.floor(Math.random() * thoughtVariants.length)]);
-
-                    // 坏心思（想对user做的"坏坏"举动或心思）
-                    const evilVariants = [
-                        `我有个小心思：想试探一下你对我的态度。比如故意说些模棱两可的话，看你会不会追问。`,
-                        `如果可以的话，我想偷偷看看你现在的表情。是在笑，还是在皱眉？这样就能猜到你的真实想法了。`,
-                        `我在想，要不要发个表情包或者语音过去，让气氛不那么严肃。然后趁机拉近点距离。`,
-                        `说实话，我有点想"欺负"你一下。比如故意不回消息，等你主动来找我。但又怕你真的不理我了。`
-                    ];
-                    const evil = ensureLength(evilVariants[Math.floor(Math.random() * evilVariants.length)]);
-
-                    return { clothing, behavior, thought, evil };
-                };
-
-                // 儲存心聲（解析成功且驗證通過就用解析結果，否則用本地合成）
-                chat.heartThoughts = chat.heartThoughts || [];
-                if (isValidHeart(parsedHeart)) {
-                    chat.heartThoughts.unshift({ id: Date.now(), time: new Date().toLocaleString(), data: parsedHeart });
-                } else {
-                    const synthesized = synthesizeHeartFromContext(chat, aiRawContent);
-                    chat.heartThoughts.unshift({ id: Date.now(), time: new Date().toLocaleString(), data: synthesized });
-                }
-
-                if (chat.heartThoughts.length > 200) chat.heartThoughts.length = 200;
-
-                // 新增：根据 AI 回覆内容决定最終状态（更精确的判断）
-                const busyKeywords = ['有事', '去忙', '不聊了', '先不聊', '有点事', '再说'];
-                const offlineKeywords = ['睡觉', '关机', '关手机', '没电', '晚安', '睡了'];
-                const futureOrNegationKeywords = ['准备', '打算', '想', '还没', '是不是', '要不要', '差不多' ,'马上', '一会儿', '等会儿', '可能', '应该', '不会', '不想' ,'不打算' ,'等等', '稍后', '也许', '或许', '大概', '不能', '待会'];
-                
-                let finalStatus = null; // null 表示不改变状态
-
-                // 检查是否是问句、包含第二人称或将来时态词，如果是，则不改变状态
-                const isQuestionOrAboutUser = /[?？]/.test(aiRawContent) || /[你妳]/.test(aiRawContent);
-                const isFutureTense = futureOrNegationKeywords.some(kw => aiRawContent.includes(kw));
-
-                // 只有在不是问句/不关于用户/不是将来时态时，才检查关键词
-                if (!isQuestionOrAboutUser && !isFutureTense) {
-                    if (offlineKeywords.some(kw => aiRawContent.includes(kw))) {
-                        finalStatus = 'offline';
-                    } else if (busyKeywords.some(kw => aiRawContent.includes(kw))) {
-                        finalStatus = 'busy';
+                    if (groupMessages.length === 0) {
+                        // Fallback if parsing failed
+                        groupMessages.push({
+                            name: chat.name,
+                            avatar: chat.avatar,
+                            content: aiRawContent
+                        });
                     }
-                }
 
-                // 之後維持原本把 aiRawContent 清理、分段、並呼叫 processSequentialMessages 的流程
-                const cleanContent = aiRawContent.replace(/（.*?）/g, '').replace(/\(.*?\)/g, '').replace(/\*.*?\*/g, '').trim();
-                const msgParts = splitAiContentToParts(cleanContent);
-                if (msgParts.length === 0) {
-                     pushMessage(chat, 'assistant', 'text', '...');
-                     props.qqData.isSending = false;
-                     props.qqData.sendingChatId = null;
-                } else {
+                    // --- 强制后处理：数量限制与防刷屏 ---
+                    
+                    // 1. 连发限制：同一角色最多连续 2 条
+                    const filteredMessages = [];
+                    let lastRole = null;
+                    let streakCount = 0;
+
+                    for (const msg of groupMessages) {
+                        if (msg.name === lastRole) {
+                            streakCount++;
+                        } else {
+                            lastRole = msg.name;
+                            streakCount = 1;
+                        }
+
+                        if (streakCount <= 2) {
+                            filteredMessages.push(msg);
+                        }
+                    }
+
+                    // 2. 总条数限制：最多 10 条
+                    if (filteredMessages.length > 10) {
+                        filteredMessages.length = 10;
+                    }
+
                     await generateHiddenThought(chat, baseUrl);
-                    processSequentialMessages(chat, msgParts, baseUrl, finalStatus);
+                    processGroupMessages(chat, filteredMessages, baseUrl);
+
+                } else {
+                    // --- 单聊处理逻辑 (保持原有) ---
+                    
+                    // 嘗試從同次回覆中抽出心聲 JSON（AI 須在主回覆後輸出 ---HEART_JSON--- 與 JSON）
+                    const heartMarker = '---HEART_JSON---';
+                    let parsedHeart = null;
+                    if (aiRawContent.includes(heartMarker)) {
+                        const parts = aiRawContent.split(heartMarker);
+                        // 保留主回覆供展示
+                        aiRawContent = parts[0].trim();
+                        const jsonPart = parts.slice(1).join(heartMarker).trim();
+                        // 先嘗試直接 parse，失敗時抓第一個 {...} 嘗試解析
+                        try {
+                            parsedHeart = JSON.parse(jsonPart);
+                        } catch (e) {
+                            const m = jsonPart.match(/\{[\s\S]*\}/);
+                            if (m) {
+                                try { parsedHeart = JSON.parse(m[0]); } catch (e2) { parsedHeart = null; }
+                            }
+                        }
+                    }
+
+                    // 儲存心聲（解析成功就用解析結果，否則忽略）
+                    chat.heartThoughts = chat.heartThoughts || [];
+                    if (parsedHeart && typeof parsedHeart === 'object') {
+                        // 简单验证字段是否存在
+                        const keys = ['clothing','behavior','thought','evil'];
+                        const hasAllKeys = keys.every(k => parsedHeart[k] && typeof parsedHeart[k] === 'string');
+                        
+                        if (hasAllKeys) {
+                            chat.heartThoughts.unshift({ id: Date.now(), time: new Date().toLocaleString(), data: parsedHeart });
+                        }
+                    }
+
+                    if (chat.heartThoughts.length > 200) chat.heartThoughts.length = 200;
+
+                    // 新增：根据 AI 回覆内容决定最終状态（更精确的判断）
+                    const busyKeywords = ['有事', '去忙', '不聊了', '先不聊', '有点事', '再说'];
+                    const offlineKeywords = ['睡觉', '关机', '关手机', '没电', '晚安', '睡了'];
+                    const futureOrNegationKeywords = ['准备', '打算', '想', '还没', '是不是', '要不要', '差不多' ,'马上', '一会儿', '等会儿', '可能', '应该', '不会', '不想' ,'不打算' ,'等等', '稍后', '也许', '或许', '大概', '不能', '待会'];
+                    
+                    let finalStatus = null; // null 表示不改变状态
+
+                    // 检查是否是问句、包含第二人称或将来时态词，如果是，则不改变状态
+                    const isQuestionOrAboutUser = /[?？]/.test(aiRawContent) || /[你妳]/.test(aiRawContent);
+                    const isFutureTense = futureOrNegationKeywords.some(kw => aiRawContent.includes(kw));
+
+                    // 只有在不是问句/不关于用户/不是将来时态时，才检查关键词
+                    if (!isQuestionOrAboutUser && !isFutureTense) {
+                        if (offlineKeywords.some(kw => aiRawContent.includes(kw))) {
+                            finalStatus = 'offline';
+                        } else if (busyKeywords.some(kw => aiRawContent.includes(kw))) {
+                            finalStatus = 'busy';
+                        }
+                    }
+
+                    // 之後維持原本把 aiRawContent 清理、分段、並呼叫 processSequentialMessages 的流程
+                    const cleanContent = aiRawContent.replace(/（.*?）/g, '').replace(/\(.*?\)/g, '').replace(/\*.*?\*/g, '').trim();
+                    const msgParts = splitAiContentToParts(cleanContent);
+                    if (msgParts.length === 0) {
+                        pushMessage(chat, 'assistant', 'text', '...');
+                        props.qqData.isSending = false;
+                        props.qqData.sendingChatId = null;
+                    } else {
+                        await generateHiddenThought(chat, baseUrl);
+                        processSequentialMessages(chat, msgParts, baseUrl, finalStatus);
+                    }
                 }
                 
             } catch (e) {
@@ -1103,7 +2271,15 @@ const generateHiddenThought = async (chat, baseUrl) => {
 
                 const promptText = chatObj.summaryPrompt || '请用第三视角总结以下对话的事件和信息';
                 const count = chatObj.summaryTriggerCount || 20;
-                const recentMsgs = validMsgs.slice(-(count + 5)).map(m => `${m.role === 'user' ? '我' : chatObj.name}: ${m.content}`).join('\n');
+                const recentMsgs = validMsgs.slice(-(count + 5)).map(m => {
+                    let senderName;
+                    if (m.role === 'user') {
+                        senderName = chatObj.isGroup ? (chatObj.userGroupNickname || '我') : '我';
+                    } else {
+                        senderName = chatObj.isGroup ? (m.customName || m.name || '群友') : chatObj.name;
+                    }
+                    return `${senderName}: ${m.content}`;
+                }).join('\n');
 
                 const res = await fetch(`${baseUrl}/v1/chat/completions`, {
                     method: 'POST',
@@ -1141,6 +2317,13 @@ const generateHiddenThought = async (chat, baseUrl) => {
         };
 
         const handleManualSummary = () => {
+            // 修复：手动总结需要访问聊天记录，但为了性能优化 tempQQSettings 默认不包含 messages
+            // 因此在触发总结前，临时将当前聊天的 messages 挂载到 tempQQSettings 上
+            const originalChat = getCurrentChat();
+            if (originalChat && originalChat.messages) {
+                tempQQSettings.messages = originalChat.messages;
+            }
+
             let baseUrl = props.apiConfig.endpoint.trim().replace(/\/+$/, '');
             if (baseUrl.endsWith('/v1')) baseUrl = baseUrl.slice(0, -3);
             generateSummary(tempQQSettings, baseUrl, props.apiConfig.key, props.apiConfig.model);
@@ -1289,6 +2472,27 @@ const copyToClipboard = async (text) => {
                 isMultiSelectMode.value = true;
                 selectedMsgIndices.value.add(contextMenu.msgIndex);
                 hideContextMenu();
+            } else if (action === 'quote') {
+                const chat = getCurrentChat();
+                const msg = chat.messages[contextMenu.msgIndex];
+                
+                let name = msg.role === 'user' ? (props.qqData.selfName || '我') : (msg.customName || chat.remark || chat.name);
+                if (chat.isGroup && msg.role !== 'user' && msg.name) {
+                    name = msg.name; // 群聊中使用消息自带的名字
+                }
+
+                let content = msg.content;
+                if (msg.type === 'image') content = '[图片]';
+                else if (msg.type === 'voice') content = '[语音]';
+                else if (msg.type === 'sticker') content = '[表情包]';
+                else if (msg.type === 'redpacket') content = '[红包]';
+                else if (msg.type === 'transfer') content = '[转账]';
+                else if (msg.type === 'location') content = '[位置]';
+                else if (msg.type === 'link') content = `[链接] ${msg.linkData?.title || ''}`;
+
+                quotingMsg.value = { name, content };
+                hideContextMenu();
+                if(chatInputRef.value) chatInputRef.value.focus();
             }
         };
 
@@ -1362,12 +2566,28 @@ const copyToClipboard = async (text) => {
                  else if(m.type === 'transfer') displayContent = '[转账]';
                  else if(m.type === 'location') displayContent = '[位置]';
                  else if(m.type === 'link') displayContent = '[链接]';
+                 else if(m.type === 'moment_share') displayContent = '[动态分享]';
+
+                 let name = '';
+                 let avatar = '';
+                 let frame = '';
+                 
+                 if (m.role === 'user') {
+                     name = sourceChat.isGroup ? (sourceChat.userGroupNickname || props.qqData.selfName || '我') : (props.qqData.selfName || '我');
+                     avatar = sourceChat.userAvatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg';
+                     frame = sourceChat.userAvatarFrame || '';
+                 } else {
+                     name = m.customName || sourceChat.remark || sourceChat.name;
+                     avatar = m.customAvatar || sourceChat.avatar;
+                     frame = sourceChat.aiAvatarFrame || '';
+                 }
 
                  return {
                      role: m.role,
                      content: displayContent,
-                     name: m.role === 'user' ? '我' : (sourceChat.remark || sourceChat.name),
-                     avatar: m.role === 'user' ? sourceChat.userAvatar : sourceChat.avatar
+                     name: name,
+                     avatar: avatar,
+                     frame: frame
                  };
             });
 
@@ -1381,11 +2601,13 @@ const copyToClipboard = async (text) => {
             forwardViewer.visible = true;
             forwardViewer.title = `${sourceChat.remark || sourceChat.name}的聊天记录`;
             forwardViewer.list = forwardedList;
+            forwardViewer.sourceIsGroup = sourceChat.isGroup || false;
 
             pushMessage(targetChat, 'user', 'forwarded', `[聊天记录] ${sourceChat.remark || sourceChat.name}的聊天记录`, {
                 forwardData: {
                     title: `${sourceChat.remark || sourceChat.name}的聊天记录`,
-                    list: forwardedList
+                    list: forwardedList,
+                    sourceIsGroup: sourceChat.isGroup || false
                 }
             });
 
@@ -1398,6 +2620,7 @@ const copyToClipboard = async (text) => {
             if (!msg.forwardData) return;
             forwardViewer.title = msg.forwardData.title;
             forwardViewer.list = msg.forwardData.list;
+            forwardViewer.sourceIsGroup = msg.forwardData.sourceIsGroup || false;
             forwardViewer.visible = true;
         };
 
@@ -1405,91 +2628,7 @@ const copyToClipboard = async (text) => {
             msg.isVoiceTextVisible = !msg.isVoiceTextVisible;
         };
 
-        // 新增：生成心聲（第一視角）並存入 chat.heartThoughts
-const generateHeartThoughts = async (chat, baseUrl) => {
-	try {
-		if (!props.apiConfig.key || !props.apiConfig.endpoint) {
-			// 無 API 時以本地簡易回退文本生成（每項約 60 字）
-			const fallback = {
-				clothing: '穿着一件简单的深色外套，袖口有些磨损，显得随性而不修边幅。',
-				behavior: '说话带有一点漫不经心的口气，但眼神会不时扫向手机通知，动作轻快。',
-				thought: '其实我有点想靠近，但又怕被看穿，内心在反复衡量该说的每一句话。',
-				evil: '如果可以，我会偷偷试探你对我的在意，再决定要不要更进一步。'
-			};
-			chat.heartThoughts = chat.heartThoughts || [];
-			chat.heartThoughts.unshift({ id: Date.now(), time: new Date().toLocaleString(), data: fallback });
-			// 保留最多 200 條以免無限增長
-			if (chat.heartThoughts.length > 200) chat.heartThoughts.length = 200;
-			return;
-		}
-
-		let endpoint = baseUrl || props.apiConfig.endpoint.trim().replace(/\/+$/, '');
-		if (endpoint.endsWith('/v1')) endpoint = endpoint.slice(0, -3);
-
-		const systemPrompt = '你是一個幫助生成角色內心獨白的工具，輸出必須為一個 JSON 物件，包含四個欄位：clothing, behavior, thought, evil。每個欄位以第一視角描述，中文，約 60 字左右，不要有其他文字或說明，也不要有額外的換行或註解。';
-		const userPrompt = `請根據角色名：「${chat.name || '未知'}」，與目前對話情境，生成四項第一視角心聲：衣著(clothing)、行為(behavior)、心聲(thought)、壞心思(evil)。每項約 60 字，中文，輸出純 JSON。`;
-
-		const res = await fetch(`${endpoint}/v1/chat/completions`, {
-			method: 'POST',
-			headers: {
-				'Authorization': `Bearer ${props.apiConfig.key}`,
-				'Content-Type': 'application/json'
-			},
-			body: JSON.stringify({
-				model: props.apiConfig.model || 'gpt-3.5-turbo',
-				messages: [
-					{ role: 'system', content: systemPrompt },
-					{ role: 'user', content: userPrompt }
-				],
-				max_tokens: 400,
-				temperature: 0.9
-			})
-		});
-
-		let parsed = null;
-		if (res.ok) {
-			const d = await res.json();
-			const txt = (d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content) ? d.choices[0].message.content.trim() : '';
-			// 嘗試純 JSON 解析
-			try {
-				parsed = JSON.parse(txt);
-			} catch (e) {
-				// 嘗試抓出簡單的鍵值對
-				const tryParse = {};
-				const matchMap = { clothing: ['衣著','clothing'], behavior: ['行为','behavior','行為'], thought: ['心声','心聲','thought'], evil: ['坏心思','壞心思','evil'] };
-				Object.keys(matchMap).forEach(k => {
-					const re = new RegExp(`${matchMap[k].join('|')}[:：]\\s*([^\\n\\r]+)`, 'i');
-					const m = txt.match(re);
-					tryParse[k] = m ? m[1].trim() : '';
-				});
-				parsed = tryParse;
-			}
-		}
-
-		if (!parsed) {
-			parsed = {
-				clothing: '穿着一件简单的深色外套，袖口有些磨损，显得随性而不修边幅。',
-				behavior: '说话带有一点漫不经心的口气，但眼神会不时扫向手机通知，动作轻快。',
-				thought: '其实我有点想靠近，但又怕被看穿，内心在反复衡量该说的每一句话。',
-				evil: '如果可以，我会偷偷试探你对我的在意，再决定要不要更进一步。'
-			};
-		}
-
-		chat.heartThoughts = chat.heartThoughts || [];
-		chat.heartThoughts.unshift({ id: Date.now(), time: new Date().toLocaleString(), data: parsed });
-		if (chat.heartThoughts.length > 200) chat.heartThoughts.length = 200;
-	} catch (e) {
-		// 失敗時回退
-		chat.heartThoughts = chat.heartThoughts || [];
-		chat.heartThoughts.unshift({ id: Date.now(), time: new Date().toLocaleString(), data: {
-			clothing: '穿着无明显特征的衣物。',
-			behavior: '举止正常但心中微动。',
-			thought: '有些复杂的念头在心里盘旋。',
-			evil: '偶尔会想试探一下对方的反应。'
-		} });
-		if (chat.heartThoughts.length > 200) chat.heartThoughts.length = 200;
-	}
-};
+        // (已移除未使用的 generateHeartThoughts 函数)
 
 // 新增：開啟心聲視窗
 const openHeartModal = () => {
@@ -1544,7 +2683,7 @@ const setFrame = (frame) => {
             editingNpcIndex.value = index;
             if (index === -1) {
                 // 新增
-                Object.assign(tempNpcData, { name: '', setting: '', relation: '' });
+                Object.assign(tempNpcData, { name: '', setting: '', relation: '', avatar: '' });
             } else {
                 // 编辑
                 const npc = tempQQSettings.npcList[index];
@@ -1562,6 +2701,11 @@ const setFrame = (frame) => {
             if (!tempQQSettings.npcList) tempQQSettings.npcList = [];
             
             const newNpc = JSON.parse(JSON.stringify(tempNpcData));
+
+            // 如果头像为空，使用预设头像
+            if (!newNpc.avatar || !newNpc.avatar.trim()) {
+                newNpc.avatar = 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg';
+            }
             
             if (editingNpcIndex.value === -1) {
                 tempQQSettings.npcList.push(newNpc);
@@ -1690,9 +2834,9 @@ const setFrame = (frame) => {
             }
         };
 
-        // 转发说说 (简单提示)
+        // 转发说说
         const forwardMoment = (moment) => {
-            alert("功能开发中，敬请期待！");
+            openForwardMomentModal(moment);
         };
 
         // 提交评论
@@ -1734,6 +2878,192 @@ const setFrame = (frame) => {
             activeMomentMenu.value = null; // Close menu after action
         };
 
+        // --- 新增：动态生成器方法 ---
+        const openMomentGenSettings = () => {
+            selectedGenFriendIds.value.clear();
+            isMomentGenSettingsOpen.value = true;
+        };
+
+        const toggleGenFriendSelection = (chat) => {
+            if (selectedGenFriendIds.value.has(chat.id)) {
+                selectedGenFriendIds.value.delete(chat.id);
+            } else {
+                selectedGenFriendIds.value.add(chat.id);
+            }
+        };
+
+        // AI 生成动态
+        const generateDynamicMoment = async () => {
+            if (selectedGenFriendIds.value.size === 0) {
+                alert("请至少选择一个角色");
+                return;
+            }
+
+            if (!props.apiConfig.key || !props.apiConfig.endpoint) {
+                alert("⚠️ 请先去【设置】App 配置 API 连接！");
+                return;
+            }
+
+            isMomentGenSettingsOpen.value = false;
+            isGeneratingMoment.value = true;
+
+            try {
+                // 1. 收集上下文
+                const selectedChats = props.qqData.chatList.filter(c => selectedGenFriendIds.value.has(c.id));
+                let combinedPersona = '';
+                let combinedNpcList = [];
+                let combinedRecentChat = '';
+
+                selectedChats.forEach(chat => {
+                    combinedPersona += `【角色: ${chat.remark || chat.name}】\n人设: ${chat.aiPersona}\n\n`;
+                    if (chat.npcList) {
+                        combinedNpcList.push(...chat.npcList);
+                    }
+                    if (chat.messages && chat.messages.length > 0) {
+                        combinedRecentChat += `--- 与 ${chat.remark || chat.name} 的最近对话 ---\n`;
+                        chat.messages.slice(-10).forEach(m => {
+                            const sender = m.role === 'user' ? '我' : (m.customName || chat.name);
+                            combinedRecentChat += `${sender}: ${m.content}\n`;
+                        });
+                        combinedRecentChat += '\n';
+                    }
+                });
+                
+                // 去重NPC
+                const uniqueNpcMap = new Map();
+                combinedNpcList.forEach(npc => {
+                    if (!uniqueNpcMap.has(npc.name)) {
+                        uniqueNpcMap.set(npc.name, npc);
+                    }
+                });
+                const uniqueNpcList = Array.from(uniqueNpcMap.values());
+                const npcNames = uniqueNpcList.map(n => n.name).join(', ');
+
+                // 2. 构建 Prompt
+                const systemPrompt = `你是一个社交媒体动态生成器。请根据提供的角色人设、NPC列表和最近的聊天记录，生成一条符合角色当前状态和心情的朋友圈动态。
+                
+要求：
+1. 从选定的角色中随机选择一位作为动态发布者。
+2. 动态内容必须与最近的聊天内容或角色人设紧密相关。
+3. 如果聊天中提到了具体的事件、地点或物品，动态中应有所体现。
+4. 可以包含 [图片]描述 的标签，描述一张符合动态内容的图片。
+5. 生成 0-5 个来自 NPC 列表中的角色的点赞。
+6. 生成 0-3 条来自 NPC 列表中的角色的评论。
+
+请严格按照以下 JSON 格式返回结果（不要包含任何其他文字）：
+{
+  "authorName": "发布者名字",
+  "content": "动态文字内容",
+  "imageDesc": "图片描述（可选，如果没有则留空）",
+  "likes": ["NPC名字1", "NPC名字2"],
+  "comments": [
+    {"author": "NPC名字", "content": "评论内容"}
+  ]
+}`;
+
+                const userPrompt = `
+【可选发布者】：${selectedChats.map(c => c.remark || c.name).join(', ')}
+【角色人设】：
+${combinedPersona}
+
+【已知 NPC】：${npcNames}
+
+【最近聊天记录】：
+${combinedRecentChat}
+
+请生成一条动态。`;
+
+                // 3. 调用 API
+                let baseUrl = props.apiConfig.endpoint.trim().replace(/\/+$/, '');
+                if (baseUrl.endsWith('/v1')) baseUrl = baseUrl.slice(0, -3);
+
+                const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: { 
+                        'Authorization': `Bearer ${props.apiConfig.key}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: props.apiConfig.model || 'gpt-3.5-turbo',
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: userPrompt }
+                        ],
+                        temperature: 0.8
+                    })
+                });
+
+                if (!res.ok) throw new Error(`API Error: ${res.status}`);
+                const data = await res.json();
+                const aiContent = data.choices[0].message.content;
+                
+                // 4. 解析结果
+                let result;
+                try {
+                    // 尝试提取 JSON
+                    const jsonMatch = aiContent.match(/\{[\s\S]*\}/);
+                    if (jsonMatch) {
+                        result = JSON.parse(jsonMatch[0]);
+                    } else {
+                        throw new Error("No JSON found");
+                    }
+                } catch (e) {
+                    console.error("JSON Parse Error", e);
+                    // Fallback
+                    result = {
+                        authorName: selectedChats[0].remark || selectedChats[0].name,
+                        content: aiContent,
+                        likes: [],
+                        comments: []
+                    };
+                }
+
+                // 5. 匹配作者信息
+                const authorChat = selectedChats.find(c => (c.remark === result.authorName || c.name === result.authorName)) || selectedChats[0];
+                
+                let images = [];
+                if (result.imageDesc) {
+                    // 这里可以使用文生图 API，暂时用占位图
+                    // 如果描述包含特定关键词，可以尝试匹配不同的占位图
+                    images.push('https://i.postimg.cc/tJYSkjdD/wu-biao-ti100-20260205190245.png'); 
+                } else if (result.content.includes('[图片]')) {
+                     images.push('https://i.postimg.cc/tJYSkjdD/wu-biao-ti100-20260205190245.png');
+                     result.content = result.content.replace(/\[图片\]/g, '').trim();
+                }
+
+                // 6. 创建动态对象
+                const newMoment = {
+                    id: Date.now(),
+                    author: {
+                        name: authorChat.remark || authorChat.name,
+                        avatar: authorChat.avatar
+                    },
+                    content: result.content,
+                    images: images,
+                    imageDescription: result.imageDesc || (result.content.includes('[图片]') ? '一张图片' : ''),
+                    mentions: [],
+                    location: '',
+                    timestamp: Date.now(),
+                    time: new Date().toLocaleString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
+                    likes: result.likes || [],
+                    comments: (result.comments || []).map((c, i) => ({
+                        id: Date.now() + i,
+                        author: c.author,
+                        content: c.content
+                    })),
+                    tempComment: ''
+                };
+
+                props.qqData.momentsList.unshift(newMoment);
+
+            } catch (e) {
+                alert("生成动态失败: " + e.message);
+                console.error(e);
+            } finally {
+                isGeneratingMoment.value = false;
+            }
+        };
+
 
         // 颜色配置：衣着(蓝)、行为(绿)、心声(粉)、坏心思(紫)
         const heartStyles = {
@@ -1765,10 +3095,12 @@ const setFrame = (frame) => {
             // 功能相关
             openRedPacketModal, confirmRedPacket, sendVoice, triggerImageUpload, sendTextImage, handleImageMsgChange,
             isLocationModalOpen, locationForm, openLocationModal, sendLocation, toggleVoiceText,
-            isRedPacketModalOpen, redPacketForm,
+            isRedPacketModalOpen, redPacketForm, redPacketTab,
             textViewer, openTextViewer,
             isLinkModalOpen, linkForm, openLinkModal, sendLink,
             linkViewer, openLinkViewer,
+            // 引用相关
+            quotingMsg, cancelQuote,
             // 表情包相关
             isStickerSettingsOpen, stickerSettingsTab, tempStickerInput, addBatchStickers, deleteAiSticker,
             isUserStickerPickerOpen, isUserStickerManageMode, userStickerInput, addUserBatchStickers, sendUserSticker,
@@ -1795,7 +3127,32 @@ const setFrame = (frame) => {
             // 新增：说说交互
             toggleLike, forwardMoment, submitComment,
             // 新增：说说菜单
-            activeMomentMenu, toggleMomentMenu, deleteMoment
+            activeMomentMenu, toggleMomentMenu, deleteMoment,
+            // 新增：转发说说
+            isForwardMomentModalOpen, forwardingMoment, openForwardMomentModal, confirmForwardMoment,
+            momentDetailModal, openMomentDetail,
+            // 新增：动态生成器
+            isMomentGenSettingsOpen, selectedGenFriendIds, isGeneratingMoment,
+            openMomentGenSettings, toggleGenFriendSelection, generateDynamicMoment,
+            handleRedPacketClick,
+            // 新增：红包详情
+            redPacketDetailsModal, sortedClaimedUsers,
+            // 群组
+            isGroupCreateOpen, groupNameInput, selectedFriendIds, openGroupCreate, toggleGroupFriendSelection, createGroup,
+            setMemberTitle,
+            // 群成员管理
+            isRoleModalOpen, isPersonaModalOpen, currentMember, tempPersonaText,
+            // 新增：成员信息编辑
+            tempMemberNickname, tempMemberAvatarFrame, isMemberFrameModalOpen,
+            openRoleModal, toggleAdmin, transferOwner, openPersonaModal, savePersona,
+            openMemberFrameModal, setMemberFrame,
+            // 添加群成员
+            isAddMemberModalOpen, selectedNewMemberIds, openAddMemberModal, toggleNewMemberSelection, addMembersToGroup,
+            getMemberRoleInfo, getRealtimeMemberAvatar, getMessageAvatar, getMessageFrame,
+            // 群公告
+            isAnnouncementModalOpen, tempAnnouncementText, announcementModalMode, openAnnouncementModal, saveAnnouncement, setAnnouncementMode,
+            // 样式相关
+            finalCustomCSS, getMemberBubbleClass, hasMemberCustomStyle
         };
     },
     template: `
@@ -1804,13 +3161,18 @@ const setFrame = (frame) => {
         <div v-if="!qqData.currentChatId" style="display:flex; flex-direction:column; height:100%;">
             <div class="app-header" v-if="activeTab !== 'moments'" style="height: calc(60px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); margin-top: 0; align-items: center; position: relative;">
                 <div class="app-header-title" style="width: 100%; text-align: center; pointer-events: none;">消息</div>
-                <div class="app-header-close" @click="handleQQCreate" style="font-size: 24px; font-weight: 300; position: absolute; right: 15px;">+</div>
+                <div style="position: absolute; right: 15px; display: flex; align-items: center; gap: 15px;">
+                    <div @click="openGroupCreate" style="cursor: pointer;">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                    </div>
+                    <div class="app-header-close" @click="handleQQCreate" style="font-size: 24px; font-weight: 300; position: static;">+</div>
+                </div>
                 <div class="app-header-left" @click="$emit('close')" style="font-weight: 400; position: absolute; left: 15px;">关闭</div>
             </div>
             <div class="app-content" style="padding: 0; flex: 1; overflow-y: auto;">
                 <div v-show="activeTab === 'msg'" class="qq-list">
                     <div class="qq-list-item" v-for="chat in qqData.chatList" :key="chat.id" @click="enterChat(chat.id)">
-                        <div class="qq-avatar" :style="chat.avatar ? { backgroundImage: 'url(' + chat.avatar + ')' } : {}"></div>
+                        <div class="qq-avatar" :style="{ backgroundImage: 'url(' + (chat.avatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg') + ')' }"></div>
                         <div class="qq-info">
                             <div class="qq-name-row">
                                 <span class="qq-name">{{ chat.remark || chat.name }}</span>
@@ -1835,8 +3197,8 @@ const setFrame = (frame) => {
                             <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg>
                             <span style="font-size: 16px; font-weight: 500; margin-left: 2px;">消息</span>
                         </div>
-                        <div style="cursor: pointer; display: flex; align-items: center; margin-right: 10px;">
-                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                        <div @click.stop="openMomentGenSettings" style="cursor: pointer; display: flex; align-items: center; margin-right: 10px;">
+                            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" :class="{ 'spinning-gear': isGeneratingMoment }"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
                         </div>
                     </div>
 
@@ -1897,9 +3259,9 @@ const setFrame = (frame) => {
                         <div v-if="qqData.momentsList && qqData.momentsList.length > 0" style="padding: 0 15px;">
                             <div v-for="moment in qqData.momentsList" :key="moment.id" style="padding: 15px 0; border-bottom: 1px solid #f0f0f0;">
                                 <div style="display: flex; align-items: center; margin-bottom: 10px;">
-                                    <div :style="{ backgroundImage: qqData.selfAvatar ? 'url(' + qqData.selfAvatar + ')' : 'none' }" style="width: 40px; height: 40px; border-radius: 50%; background-color: #eee; margin-right: 10px; background-size: cover; background-position: center;"></div>
+                                    <div :style="{ backgroundImage: (moment.author && moment.author.avatar) ? 'url(' + moment.author.avatar + ')' : (qqData.selfAvatar ? 'url(' + qqData.selfAvatar + ')' : 'none') }" style="width: 40px; height: 40px; border-radius: 50%; background-color: #eee; margin-right: 10px; background-size: cover; background-position: center;"></div>
                                     <div style="flex: 1;">
-                                        <div style="font-weight: bold; color: #586b95;">{{ qqData.selfName || '我' }}</div>
+                                        <div style="font-weight: bold; color: #586b95;">{{ (moment.author && moment.author.name) ? moment.author.name : (qqData.selfName || '我') }}</div>
                                         <div style="font-size: 12px; color: #999;">{{ moment.time }}</div>
                                     </div>
                                     <!-- 新增：说说操作菜单 -->
@@ -1913,9 +3275,16 @@ const setFrame = (frame) => {
                                     </div>
                                 </div>
                                 <div v-if="moment.content" style="margin-bottom: 8px; white-space: pre-wrap; line-height: 1.6;">{{ moment.content }}</div>
-                                <div v-if="moment.images && moment.images.length > 0" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 8px;">
-                                    <div v-for="(img, idx) in moment.images" :key="idx" style="padding-top: 100%; position: relative; background-color: #eee; border-radius: 4px; overflow: hidden;">
-                                        <img :src="img" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;">
+                                <div v-if="moment.images && moment.images.length > 0" style="margin-bottom: 8px;">
+                                    <div v-if="moment.imageDescription" style="background-color: #f2f2f7; border-radius: 4px; overflow: hidden; width: 100%; max-width: 200px; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; padding: 15px; box-sizing: border-box; border: 1px solid #e5e5ea;">
+                                        <span style="font-size: 13px; color: #666; text-align: center; line-height: 1.4;">
+                                            {{ moment.imageDescription }}
+                                        </span>
+                                    </div>
+                                    <div v-else style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;">
+                                        <div v-for="(img, idx) in moment.images" :key="idx" style="padding-top: 100%; position: relative; background-color: #eee; border-radius: 4px; overflow: hidden;">
+                                            <img :src="img" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;">
+                                        </div>
                                     </div>
                                 </div>
                                 <div v-if="moment.location" style="font-size: 12px; color: #586b95; margin-bottom: 5px;">📍 {{ moment.location }}</div>
@@ -1990,13 +3359,13 @@ const setFrame = (frame) => {
                 </div>
                 <div class="app-header-title" style="width: 60%; text-align: center; position: absolute; left: 0; right: 0; margin-left: auto; margin-right: auto; display: flex; flex-direction: column; align-items: center; pointer-events: none;">
                     <span v-if="qqData.isSending && qqData.sendingChatId === getCurrentChat().id" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.2; color: #888; font-style: italic;">
-                        对方正在输入中...
+                        {{ getCurrentChat().isGroup ? '成员正在输入中...' : '对方正在输入中...' }}
                     </span>
                     <span v-else style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; line-height: 1.2;">
                         {{ getCurrentChat().remark || getCurrentChat().name }}
                     </span>
                     
-                    <div style="display: flex; align-items: center; margin-top: 2px;">
+                    <div v-if="!getCurrentChat().isGroup" style="display: flex; align-items: center; margin-top: 2px;">
                         <div :style="{
                             width: '8px', 
                             height: '8px', 
@@ -2010,12 +3379,16 @@ const setFrame = (frame) => {
                     </div>
                 </div>
                 <!-- ✅ 新增：粉色愛心按鈕（齒輪左側） -->
-                <div style="position: absolute; right: 54px; z-index: 11;">
+                <div v-if="!getCurrentChat().isGroup" style="position: absolute; right: 54px; z-index: 11;">
                     <button @click.stop="openHeartModal" title="心聲" style="width:28px; height:28px; border-radius:50%; border:none; background: linear-gradient(135deg,#ff9ac2,#ff6fa3); display:flex; align-items:center; justify-content:center; box-shadow:0 1px 6px rgba(255,102,170,0.18);">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="white" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12.1 21.35l-1.1-1.02C5.14 15.24 2 12.39 2 8.99 2 6.42 4.24 4.5 6.76 4.5c1.54 0 3.04.99 3.74 2.44.7-1.45 2.2-2.44 3.74-2.44C19.76 4.5 22 6.42 22 8.99c0 3.4-3.14 6.25-8.99 11.34l-1.01 1.02z"/>
                         </svg>
                     </button>
+                </div>
+                <!-- 新增：群公告按钮 -->
+                <div v-if="getCurrentChat().isGroup" @click.stop="openAnnouncementModal" style="position: absolute; right: 54px; z-index: 11; cursor: pointer; color: currentColor;">
+                    <svg width="22" height="22" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg" fill="currentColor"><path d="M880 112H144c-17.7 0-32 14.3-32 32v736c0 17.7 14.3 32 32 32h736c17.7 0 32-14.3 32-32V144c0-17.7-14.3-32-32-32zM248 512h64c4.4 0 8-3.6 8-8V296c0-4.4-3.6-8-8-8h-64c-4.4 0-8 3.6-8 8v208c0 4.4 3.6 8 8 8zm464 232H312c-4.4 0-8-3.6-8-8v-48c0-4.4 3.6-8 8-8h400c4.4 0 8 3.6 8 8v48c0 4.4-3.6 8-8 8zm0-224H312c-4.4 0-8-3.6-8-8v-48c0-4.4 3.6-8 8-8h400c4.4 0 8 3.6 8 8v48c0 4.4-3.6 8-8 8z"/></svg>
                 </div>
                 <div class="app-header-close" @click="openQQSettings" style="font-size: 25px; position: absolute; right: 15px; z-index: 10;">
                     ⚙️
@@ -2025,16 +3398,16 @@ const setFrame = (frame) => {
 
             <div class="chat-scroll-area" ref="chatContainer" style="padding-bottom: 10px; position: relative;" :style="{ backgroundImage: getCurrentChat().backgroundUrl ? 'url(' + getCurrentChat().backgroundUrl + ')' : (qqData.universalWallpaper ? 'url(' + qqData.universalWallpaper + ')' : 'none'), backgroundSize: 'cover', backgroundPosition: 'center', backgroundAttachment: 'fixed' }">
                 <!-- ✅ 动态注入当前聊天的自定义CSS，使用 scoped 属性确保样式隔离 -->
-                <component :is="'style'" v-if="getCurrentChat().customCSS">{{ getCurrentChat().customCSS }}</component>
+                <component :is="'style'" v-if="finalCustomCSS">{{ finalCustomCSS }}</component>
                 
                 <template v-for="(msg, index) in getCurrentChat().messages" :key="index">
                     <!-- 时间气泡 -->
                     <div v-if="msg.showTime" style="width: 100%; text-align: center; margin: 20px 0 10px;">
-                        <span style="background: #cacaca; color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px;">{{ msg.timeDisplay }}</span>
+                        <span style="background: rgba(0, 0, 0, 0.2); color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px;">{{ msg.timeDisplay }}</span>
                     </div>
 
                     <div class="chat-row"
-                        style="display:flex; width: 100%; margin-bottom: 6px; align-items: flex-start; position: relative;"
+                        style="display:flex; width: 100%; margin-bottom: 0.5px; align-items: flex-start; position: relative;"
                         :style="{ flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' }"
                         @click="toggleSelectMsg(index)"
                     >
@@ -2061,59 +3434,73 @@ const setFrame = (frame) => {
                          @touchcancel="handleMsgTouchEnd"
                          @contextmenu.prevent="showContextMenu($event, index)"
                     >
-                        <span style="background: #e0e0e0; color: #888; padding: 2px 8px; border-radius: 4px; font-size: 12px;">
-                            {{ msg.role === 'user' ? '我' : (getCurrentChat().remark || getCurrentChat().name) }} 撤回了一则消息
+                        <span style="background: rgba(0, 0, 0, 0.2); color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">
+                            {{ msg.role === 'user' ? '我' : (getCurrentChat().isGroup ? (msg.customName || msg.name) : (getCurrentChat().remark || getCurrentChat().name)) }} 撤回了一则消息
+                        </span>
+                    </div>
+
+                    <!-- 新增：群公告更新消息 -->
+                    <div v-else-if="msg.type === 'announcement_update'"
+                         style="width: 100%; text-align: center; margin: 5px 0;">
+                        <span style="background: rgba(0, 0, 0, 0.2); color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">
+                            {{ msg.content }}
                         </span>
                     </div>
 
                     <!-- 语音消息 (展开式) -->
                     <div v-else-if="msg.type === 'voice'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
-                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
-                            <div :class="['message-bubble', msg.role === 'user' ? 'user' : 'ai']">
-                                <div class="content"
-                                     @touchstart="handleMsgTouchStart($event, index)"
-                                     @touchend="handleMsgTouchEnd"
-                                     @touchcancel="handleMsgTouchEnd"
-                                     @contextmenu.prevent="showContextMenu($event, index)"
-                                     @click="toggleVoiceText(msg)"
-                                     :style="[
-                                        {
-                                            width: (msg.isVoiceTextVisible ? 'auto' : (60 + msg.duration * 5) + 'px'),
-                                            maxWidth: '240px'
-                                        },
-                                        !getCurrentChat().customCSS
-                                            ? (msg.role === 'user'
-                                                ? { background: 'var(--accent-color)', color: '#fff', borderRadius: '18px', borderTopRightRadius: '4px' }
-                                                : { background: '#fff', color: '#000', borderRadius: '18px', borderTopLeftRadius: '4px' }
-                                            )
-                                            : {}
-                                     ]"
-                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; display: flex; flex-direction: column; min-width: 60px; padding: 10px 12px;"
-                                >
-                                    <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
-                                        <template v-if="msg.role !== 'user'">
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="transform: rotate(180deg);">
-                                                <path d="M12 4L12 20M8 7L8 17M4 10L4 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                                                <path d="M16 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
-                                                <path d="M20 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
-                                            </svg>
-                                            <span :style="{ fontSize: (getCurrentChat().fontSize || 16) + 'px' }" style="font-weight: bold; margin-left: 5px;">{{ msg.duration }}"</span>
-                                        </template>
-                                        <template v-else>
-                                            <span :style="{ fontSize: (getCurrentChat().fontSize || 16) + 'px' }" style="font-weight: bold; margin-right: 5px;">{{ msg.duration }}"</span>
-                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-                                                <path d="M3 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
-                                                <path d="M-1 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
-                                                <path d="M3 12a3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3 3 3 0 0 1-3-3" fill="currentColor" />
-                                            </svg>
-                                        </template>
-                                    </div>
-                                    <div v-if="msg.isVoiceTextVisible" 
-                                         :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }"
-                                         style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.1); text-align: left; line-height: 1.4; white-space: pre-wrap; word-break: break-all;">
-                                        {{ msg.voiceText }}
+                        <div class="chat-avatar-small" :class="getMessageFrame(msg)" :style="{ backgroundImage: 'url(' + getMessageAvatar(msg) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; flex-direction: column;" :style="{ alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }">
+                            <div v-if="getCurrentChat().isGroup" style="font-size: 12px; color: #888; margin-bottom: 5px; display: flex; align-items: center;" :style="{ marginLeft: msg.role !== 'user' ? '4px' : '0', marginRight: msg.role === 'user' ? '4px' : '0' }">
+                                <span v-if="getMemberRoleInfo(getCurrentChat(), msg)" :style="getMemberRoleInfo(getCurrentChat(), msg).style" style="font-size: 10px; padding: 0 4px; border-radius: 4px; margin-right: 4px; line-height: 1.4;">{{ getMemberRoleInfo(getCurrentChat(), msg).text }}</span>
+                                <span>{{ msg.role !== 'user' ? msg.customName : (getCurrentChat().userGroupNickname || qqData.selfName || '我') }}</span>
+                            </div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                                <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
+                                <div :class="['message-bubble', msg.role === 'user' ? 'user' : 'ai']">
+                                    <div class="content"
+                                        @touchstart="handleMsgTouchStart($event, index)"
+                                        @touchend="handleMsgTouchEnd"
+                                        @touchcancel="handleMsgTouchEnd"
+                                        @contextmenu.prevent="showContextMenu($event, index)"
+                                        @click="toggleVoiceText(msg)"
+                                        :style="[
+                                            {
+                                                width: (msg.isVoiceTextVisible ? 'auto' : (60 + msg.duration * 5) + 'px'),
+                                                maxWidth: '240px'
+                                            },
+                                            !getCurrentChat().customCSS
+                                                ? (msg.role === 'user'
+                                                    ? { background: 'var(--accent-color)', color: '#fff', borderRadius: '18px', borderTopRightRadius: '4px' }
+                                                    : { background: '#fff', color: '#000', borderRadius: '18px', borderTopLeftRadius: '4px' }
+                                                )
+                                                : {}
+                                        ]"
+                                        style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; display: flex; flex-direction: column; min-width: 60px; padding: 10px 12px;"
+                                    >
+                                        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                                            <template v-if="msg.role !== 'user'">
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="transform: rotate(180deg);">
+                                                    <path d="M12 4L12 20M8 7L8 17M4 10L4 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                                                    <path d="M16 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
+                                                    <path d="M20 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
+                                                </svg>
+                                                <span :style="{ fontSize: (getCurrentChat().fontSize || 16) + 'px' }" style="font-weight: bold; margin-left: 5px;">{{ msg.duration }}"</span>
+                                            </template>
+                                            <template v-else>
+                                                <span :style="{ fontSize: (getCurrentChat().fontSize || 16) + 'px' }" style="font-weight: bold; margin-right: 5px;">{{ msg.duration }}"</span>
+                                                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+                                                    <path d="M3 6c1.5 0 3 2 3 6s-1.5 6-3 6" stroke="currentColor" stroke-width="2" fill="none" />
+                                                    <path d="M-1 3c2.5 0 5 3 5 9s-2.5 9-5 9" stroke="currentColor" stroke-width="2" fill="none" />
+                                                    <path d="M3 12a3 3 0 0 1 3-3 3 3 0 0 1 3 3 3 3 0 0 1-3 3 3 3 0 0 1-3-3" fill="currentColor" />
+                                                </svg>
+                                            </template>
+                                        </div>
+                                        <div v-if="msg.isVoiceTextVisible" 
+                                            :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }"
+                                            style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.1); text-align: left; line-height: 1.4; white-space: pre-wrap; word-break: break-all;">
+                                            {{ msg.voiceText }}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -2122,90 +3509,116 @@ const setFrame = (frame) => {
 
                     <!-- 红包 (Ins风) -->
                     <div v-else-if="msg.type === 'redpacket'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
-                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
-                            <div class="chat-bubble"
-                                 @touchstart="handleMsgTouchStart($event, index)"
-                                 @touchend="handleMsgTouchEnd"
-                                 @contextmenu.prevent="showContextMenu($event, index)"
-                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: linear-gradient(135deg, #ffc3a0 0%, #ffafbd 100%); border: none; overflow: hidden; width: 220px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);"
-                            >
-                                <div style="padding: 20px 15px; display: flex; align-items: center;">
-                                    <div style="font-size: 28px; margin-right: 12px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.1));">🍬</div>
-                                <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 15 / 16) + 'px' }" style="color: white; font-weight: 500; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">{{ msg.packetText }}</div>
+                        <div class="chat-avatar-small" :class="getMessageFrame(msg)" :style="{ backgroundImage: 'url(' + getMessageAvatar(msg) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; flex-direction: column;" :style="{ alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }">
+                            <div v-if="getCurrentChat().isGroup" style="font-size: 12px; color: #888; margin-bottom: 5px; display: flex; align-items: center;" :style="{ marginLeft: msg.role !== 'user' ? '4px' : '0', marginRight: msg.role === 'user' ? '4px' : '0' }">
+                                <span v-if="getMemberRoleInfo(getCurrentChat(), msg)" :style="getMemberRoleInfo(getCurrentChat(), msg).style" style="font-size: 10px; padding: 0 4px; border-radius: 4px; margin-right: 4px; line-height: 1.4;">{{ getMemberRoleInfo(getCurrentChat(), msg).text }}</span>
+                                <span>{{ msg.role !== 'user' ? msg.customName : (getCurrentChat().userGroupNickname || qqData.selfName || '我') }}</span>
+                            </div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                                <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
+                                <div class="chat-bubble"
+                                     @touchstart="handleMsgTouchStart($event, index)"
+                                     @touchend="handleMsgTouchEnd"
+                                     @contextmenu.prevent="showContextMenu($event, index)"
+                                     @click="handleRedPacketClick(msg)"
+                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: linear-gradient(135deg, #ffc3a0 0%, #ffafbd 100%); border: none; overflow: hidden; width: 220px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); cursor: pointer;"
+                                >
+                                    <div style="padding: 20px 15px; display: flex; align-items: center;">
+                                        <div style="font-size: 28px; margin-right: 12px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.1));">🍬</div>
+                                        <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 15 / 16) + 'px' }" style="color: white; font-weight: 500; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                                            <template v-if="msg.packetType === 'exclusive'">
+                                                给 {{ (getCurrentChat().members.find(m => m.id === msg.recipient) || {}).name || '神秘人' }} 的红包
+                                            </template>
+                                            <template v-else>
+                                                {{ msg.packetText }}
+                                            </template>
+                                        </div>
+                                    </div>
+                                    <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px' }" style="background: rgba(255,255,255,0.3); padding: 0; color: white; text-align: left; height: 4px;"></div>
                                 </div>
-                                <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px' }" style="background: rgba(255,255,255,0.3); padding: 0; color: white; text-align: left; height: 4px;"></div>
                             </div>
                         </div>
                     </div>
 
                     <!-- 转账 (Ins风) -->
                     <div v-else-if="msg.type === 'transfer'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
-                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
-                            <div class="chat-bubble"
-                                 @touchstart="handleMsgTouchStart($event, index)"
-                                 @touchend="handleMsgTouchEnd"
-                                 @contextmenu.prevent="showContextMenu($event, index)"
-                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%); border: none; overflow: hidden; width: 220px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);"
-                            >
-                                <div style="padding: 20px 15px; display: flex; align-items: center;">
-                                    <div style="width: 38px; height: 38px; background: rgba(255,255,255,0.3); border-radius: 50%; display: flex; justify-content: center; align-items: center; margin-right: 12px; color: white;">
-                                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                        <div class="chat-avatar-small" :class="getMessageFrame(msg)" :style="{ backgroundImage: 'url(' + getMessageAvatar(msg) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; flex-direction: column;" :style="{ alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }">
+                            <div v-if="getCurrentChat().isGroup" style="font-size: 12px; color: #888; margin-bottom: 5px; display: flex; align-items: center;" :style="{ marginLeft: msg.role !== 'user' ? '4px' : '0', marginRight: msg.role === 'user' ? '4px' : '0' }">
+                                <span v-if="getMemberRoleInfo(getCurrentChat(), msg)" :style="getMemberRoleInfo(getCurrentChat(), msg).style" style="font-size: 10px; padding: 0 4px; border-radius: 4px; margin-right: 4px; line-height: 1.4;">{{ getMemberRoleInfo(getCurrentChat(), msg).text }}</span>
+                                <span>{{ msg.role !== 'user' ? msg.customName : (getCurrentChat().userGroupNickname || qqData.selfName || '我') }}</span>
+                            </div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                                <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
+                                <div class="chat-bubble"
+                                     @touchstart="handleMsgTouchStart($event, index)"
+                                     @touchend="handleMsgTouchEnd"
+                                     @contextmenu.prevent="showContextMenu($event, index)"
+                                     @click="handleRedPacketClick(msg)"
+                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%); border: none; overflow: hidden; width: 220px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); cursor: pointer;"
+                                >
+                                    <div style="padding: 20px 15px; display: flex; align-items: center;">
+                                        <div style="width: 38px; height: 38px; background: rgba(255,255,255,0.3); border-radius: 50%; display: flex; justify-content: center; align-items: center; margin-right: 12px; color: white;">
+                                             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                                        </div>
+                                        <div style="color: white; display: flex; flex-direction: column; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">
+                                            <span :style="{ fontSize: (getCurrentChat().fontSize || 16) + 'px' }" style="font-weight: bold;">¥ {{ msg.amount }}</span>
+                                            <span :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="opacity: 0.9; margin-top: 2px;">{{ msg.isReceived ? (msg.role === 'user' ? '对方已收款' : '你已收款') : '转账给你' }}</span>
+                                        </div>
                                     </div>
-                                    <div style="color: white; display: flex; flex-direction: column; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">
-                                        <span :style="{ fontSize: (getCurrentChat().fontSize || 16) + 'px' }" style="font-weight: bold;">¥ {{ msg.amount }}</span>
-                                        <span :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="opacity: 0.9; margin-top: 2px;">转账给你</span>
-                                    </div>
+                                    <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px' }" style="background: rgba(255,255,255,0.3); padding: 0; color: white; text-align: left; height: 4px;"></div>
                                 </div>
-                                <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px' }" style="background: rgba(255,255,255,0.3); padding: 0; color: white; text-align: left; height: 4px;"></div>
                             </div>
                         </div>
                     </div>
 
                     <!-- 表情包 (纯图片，无背景) -->
                     <div v-else-if="msg.type === 'sticker'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
-                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
-                            <div class="chat-bubble"
-                                 @touchstart="handleMsgTouchStart($event, index)"
-                                 @touchend="handleMsgTouchEnd"
-                                 @contextmenu.prevent="showContextMenu($event, index)"
-                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: transparent; border: none; overflow: hidden;"
-                            >
-                                <img :src="msg.src" style="max-width: 120px; max-height: 120px; display: block; border-radius: 4px;">
+                        <div class="chat-avatar-small" :class="getMessageFrame(msg)" :style="{ backgroundImage: 'url(' + getMessageAvatar(msg) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; flex-direction: column;" :style="{ alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }">
+                            <div v-if="getCurrentChat().isGroup" style="font-size: 12px; color: #888; margin-bottom: 5px; display: flex; align-items: center;" :style="{ marginLeft: msg.role !== 'user' ? '4px' : '0', marginRight: msg.role === 'user' ? '4px' : '0' }">
+                                <span v-if="getMemberRoleInfo(getCurrentChat(), msg)" :style="getMemberRoleInfo(getCurrentChat(), msg).style" style="font-size: 10px; padding: 0 4px; border-radius: 4px; margin-right: 4px; line-height: 1.4;">{{ getMemberRoleInfo(getCurrentChat(), msg).text }}</span>
+                                <span>{{ msg.role !== 'user' ? msg.customName : (getCurrentChat().userGroupNickname || qqData.selfName || '我') }}</span>
+                            </div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                                <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
+                                <div class="chat-bubble"
+                                    @touchstart="handleMsgTouchStart($event, index)"
+                                    @touchend="handleMsgTouchEnd"
+                                    @contextmenu.prevent="showContextMenu($event, index)"
+                                    style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: transparent; border: none; overflow: hidden;"
+                                >
+                                    <img :src="msg.src" style="max-width: 120px; max-height: 120px; display: block; border-radius: 4px;">
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     <!-- 图片 (描述卡片) -->
                     <div v-else-if="msg.type === 'image'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
-                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
-                            <div class="chat-bubble"
-                                 @touchstart="handleMsgTouchStart($event, index)"
-                                 @touchend="handleMsgTouchEnd"
-                                 @contextmenu.prevent="showContextMenu($event, index)"
-                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: transparent; border: none; overflow: hidden;"
-                            >
-                                <img v-if="msg.imgType === 'local'" :src="msg.src" style="max-width: 150px; max-height: 200px; border-radius: 8px; display: block;">
-                                <div v-else 
-                                     @click.stop="openTextViewer(msg.description)"
-                                     @touchstart.stop
-                                     @touchend.stop="openTextViewer(msg.description)"
-                                     style="background: #f2f2f2; border-radius: 8px; width: 140px; height: 140px; display: flex; justify-content: center; align-items: center; cursor: pointer; border: 1px solid #e0e0e0; transition: background 0.2s;"
-                                     @mouseenter="$event.target.style.background='#e8e8e8'"
-                                     @mouseleave="$event.target.style.background='#f2f2f2'"
+                        <div class="chat-avatar-small" :class="getMessageFrame(msg)" :style="{ backgroundImage: 'url(' + getMessageAvatar(msg) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; flex-direction: column;" :style="{ alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }">
+                            <div v-if="getCurrentChat().isGroup" style="font-size: 12px; color: #888; margin-bottom: 5px; display: flex; align-items: center;" :style="{ marginLeft: msg.role !== 'user' ? '4px' : '0', marginRight: msg.role === 'user' ? '4px' : '0' }">
+                                <span v-if="getMemberRoleInfo(getCurrentChat(), msg)" :style="getMemberRoleInfo(getCurrentChat(), msg).style" style="font-size: 10px; padding: 0 4px; border-radius: 4px; margin-right: 4px; line-height: 1.4;">{{ getMemberRoleInfo(getCurrentChat(), msg).text }}</span>
+                                <span>{{ msg.role !== 'user' ? msg.customName : (getCurrentChat().userGroupNickname || qqData.selfName || '我') }}</span>
+                            </div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                                <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
+                                <div class="chat-bubble"
+                                    @touchstart="handleMsgTouchStart($event, index)"
+                                    @touchend="handleMsgTouchEnd"
+                                    @contextmenu.prevent="showContextMenu($event, index)"
+                                    style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: transparent; border: none; overflow: hidden;"
                                 >
-                                    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#999" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
-                                        <polyline points="21 15 16 10 5 21"></polyline>
-                                    </svg>
+                                    <img v-if="msg.imgType === 'local'" :src="msg.src" style="max-width: 150px; max-height: 200px; border-radius: 8px; display: block;">
+                                    <img v-else 
+                                        @click.stop="openTextViewer(msg.description)"
+                                        @touchstart.stop
+                                        @touchend.stop="openTextViewer(msg.description)"
+                                        src="https://i.postimg.cc/tJYSkjdD/wu-biao-ti100-20260205190245.png"
+                                        style="width: 140px; height: 140px; object-fit: cover; border-radius: 8px; cursor: pointer; border: 1px solid #e0e0e0;"
+                                    >
                                 </div>
                             </div>
                         </div>
@@ -2213,25 +3626,31 @@ const setFrame = (frame) => {
 
                     <!-- 位置 -->
                     <div v-else-if="msg.type === 'location'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
-                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
-                            <div class="chat-bubble"
-                                 @touchstart="handleMsgTouchStart($event, index)"
-                                 @touchend="handleMsgTouchEnd"
-                                 @contextmenu.prevent="showContextMenu($event, index)"
-                                 style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: white; border: 1px solid #ddd; overflow: hidden; width: 220px; border-radius: 8px;"
-                            >
-                                <div style="height: 100px; position: relative; background-color: #f2f1ed; background-image: linear-gradient(#dcdcdc 1px, transparent 1px), linear-gradient(90deg, #dcdcdc 1px, transparent 1px); background-size: 20px 20px;">
-                                    <div style="position: absolute; top: 30%; left: 0; width: 100%; height: 15px; background: #aadaff; transform: rotate(-5deg);"></div>
-                                    <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); font-size: 24px; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));">
-                                        📍
+                        <div class="chat-avatar-small" :class="getMessageFrame(msg)" :style="{ backgroundImage: 'url(' + getMessageAvatar(msg) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; flex-direction: column;" :style="{ alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }">
+                            <div v-if="getCurrentChat().isGroup" style="font-size: 12px; color: #888; margin-bottom: 5px; display: flex; align-items: center;" :style="{ marginLeft: msg.role !== 'user' ? '4px' : '0', marginRight: msg.role === 'user' ? '4px' : '0' }">
+                                <span v-if="getMemberRoleInfo(getCurrentChat(), msg)" :style="getMemberRoleInfo(getCurrentChat(), msg).style" style="font-size: 10px; padding: 0 4px; border-radius: 4px; margin-right: 4px; line-height: 1.4;">{{ getMemberRoleInfo(getCurrentChat(), msg).text }}</span>
+                                <span>{{ msg.role !== 'user' ? msg.customName : (getCurrentChat().userGroupNickname || qqData.selfName || '我') }}</span>
+                            </div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                                <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
+                                <div class="chat-bubble"
+                                    @touchstart="handleMsgTouchStart($event, index)"
+                                    @touchend="handleMsgTouchEnd"
+                                    @contextmenu.prevent="showContextMenu($event, index)"
+                                    style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: white; border: 1px solid #ddd; overflow: hidden; width: 220px; border-radius: 8px;"
+                                >
+                                    <div style="height: 100px; position: relative; background-color: #f2f1ed; background-image: linear-gradient(#dcdcdc 1px, transparent 1px), linear-gradient(90deg, #dcdcdc 1px, transparent 1px); background-size: 20px 20px;">
+                                        <div style="position: absolute; top: 30%; left: 0; width: 100%; height: 15px; background: #aadaff; transform: rotate(-5deg);"></div>
+                                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -100%); font-size: 24px; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.3));">
+                                            📍
+                                        </div>
                                     </div>
-                                </div>
-                                <div style="padding: 10px;">
-                                    <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }" style="font-weight: bold; margin-bottom: 4px; color: #000;">{{ msg.locEnd }}</div>
-                                    <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #888;">
-                                        {{ msg.locStart }} -> {{ msg.locVia ? msg.locVia + ' -> ' : '' }}{{ msg.locEnd }}
+                                    <div style="padding: 10px;">
+                                        <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }" style="font-weight: bold; margin-bottom: 4px; color: #000;">{{ msg.locEnd }}</div>
+                                        <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #888;">
+                                            {{ msg.locStart }} -> {{ msg.locVia ? msg.locVia + ' -> ' : '' }}{{ msg.locEnd }}
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -2240,77 +3659,135 @@ const setFrame = (frame) => {
 
                     <!-- 链接消息 -->
                     <div v-else-if="msg.type === 'link'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
-                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
-                            <div class="chat-bubble"
-                                @touchstart="handleMsgTouchStart($event, index)"
-                                @touchend="handleMsgTouchEnd"
-                                @contextmenu.prevent="showContextMenu($event, index)"
-                                @click.stop="openLinkViewer(msg)"
-                                style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; overflow: hidden; background: white; border: 1px solid #ddd; width: 230px; cursor: pointer;"
-                            >
-                                <div style="padding: 12px; display: flex; align-items: center;">
-                                    <div style="flex: 1; overflow: hidden;">
-                                        <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }" style="font-weight: bold; color: #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                            {{ msg.linkData.title }}
+                        <div class="chat-avatar-small" :class="getMessageFrame(msg)" :style="{ backgroundImage: 'url(' + getMessageAvatar(msg) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; flex-direction: column;" :style="{ alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }">
+                            <div v-if="getCurrentChat().isGroup" style="font-size: 12px; color: #888; margin-bottom: 5px; display: flex; align-items: center;" :style="{ marginLeft: msg.role !== 'user' ? '4px' : '0', marginRight: msg.role === 'user' ? '4px' : '0' }">
+                                <span v-if="getMemberRoleInfo(getCurrentChat(), msg)" :style="getMemberRoleInfo(getCurrentChat(), msg).style" style="font-size: 10px; padding: 0 4px; border-radius: 4px; margin-right: 4px; line-height: 1.4;">{{ getMemberRoleInfo(getCurrentChat(), msg).text }}</span>
+                                <span>{{ msg.role !== 'user' ? msg.customName : (getCurrentChat().userGroupNickname || qqData.selfName || '我') }}</span>
+                            </div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                                <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
+                                <div class="chat-bubble"
+                                    @touchstart="handleMsgTouchStart($event, index)"
+                                    @touchend="handleMsgTouchEnd"
+                                    @contextmenu.prevent="showContextMenu($event, index)"
+                                    @click.stop="openLinkViewer(msg)"
+                                    style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; overflow: hidden; background: white; border: 1px solid #ddd; width: 230px; cursor: pointer;"
+                                >
+                                    <div style="padding: 12px; display: flex; align-items: center;">
+                                        <div style="flex: 1; overflow: hidden;">
+                                            <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }" style="font-weight: bold; color: #000; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                                {{ msg.linkData.title }}
+                                            </div>
+                                            <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 12 / 16) + 'px' }" style="color: #888; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                                {{ msg.linkData.content }}
+                                            </div>
                                         </div>
-                                        <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 12 / 16) + 'px' }" style="color: #888; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                            {{ msg.linkData.content }}
+                                        <div style="margin-left: 12px; font-size: 32px;">
+                                            🔗
                                         </div>
                                     </div>
-                                    <div style="margin-left: 12px; font-size: 32px;">
-                                        🔗
+                                    <div v-if="msg.linkData.source" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px' }" style="padding: 5px 12px; border-top: 1px solid #eee; color: #aaa;">
+                                        来源: {{ msg.linkData.source }}
                                     </div>
-                                </div>
-                                <div v-if="msg.linkData.source" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px' }" style="padding: 5px 12px; border-top: 1px solid #eee; color: #aaa;">
-                                    来源: {{ msg.linkData.source }}
                                 </div>
                             </div>
                         </div>
                     </div>
 
                     <!-- 转发消息 -->
-                    <div v-else-if="msg.type === 'forwarded'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="max-width: 70%;">
-                         <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + msg.avatar + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', flexShrink: 0, marginRight: '10px' }"></div>
-                         <div class="chat-bubble"
-                             @touchstart="handleMsgTouchStart($event, index)"
-                             @touchend="handleMsgTouchEnd"
-                             @contextmenu.prevent="showContextMenu($event, index)"
-                             @click.stop="openForwardViewer(msg)"
-                             style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; overflow: hidden; background: white; border: 1px solid #ddd; width: 220px;"
-                         >
-                            <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }" style="padding: 8px 10px; border-bottom: 1px solid #eee; font-weight: bold; color: #000;">
-                                {{ msg.forwardData.title }}
+                    <div v-else-if="msg.type === 'forwarded'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
+                        <div class="chat-avatar-small" :class="getMessageFrame(msg)" :style="{ backgroundImage: 'url(' + getMessageAvatar(msg) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; flex-direction: column;" :style="{ alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }">
+                            <div v-if="getCurrentChat().isGroup" style="font-size: 12px; color: #888; margin-bottom: 5px;" :style="{ marginLeft: msg.role !== 'user' ? '4px' : '0', marginRight: msg.role === 'user' ? '4px' : '0' }">{{ msg.role !== 'user' ? msg.customName : (getCurrentChat().userGroupNickname || qqData.selfName || '我') }}</div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                                <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
+                                <div class="chat-bubble"
+                                     @touchstart="handleMsgTouchStart($event, index)"
+                                     @touchend="handleMsgTouchEnd"
+                                     @contextmenu.prevent="showContextMenu($event, index)"
+                                     @click.stop="openForwardViewer(msg)"
+                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; overflow: hidden; background: white; border: 1px solid #ddd; width: 220px; cursor: pointer;"
+                                 >
+                                    <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px' }" style="padding: 8px 10px; border-bottom: 1px solid #eee; font-weight: bold; color: #000;">
+                                        {{ msg.forwardData.title }}
+                                    </div>
+                                    <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 12 / 16) + 'px' }" style="padding: 8px 10px; color: #888; line-height: 1.5;">
+                                        <div v-for="(subMsg, idx) in msg.forwardData.list.slice(0, 3)" :key="idx" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                            {{ subMsg.name }}: {{ subMsg.content }}
+                                        </div>
+                                        <div v-if="msg.forwardData.list.length > 3">...</div>
+                                    </div>
+                                    <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px' }" style="padding: 5px 10px; border-top: 1px solid #eee; color: #aaa;">
+                                     聊天记录
+                                    </div>
+                                 </div>
                             </div>
-                            <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 12 / 16) + 'px' }" style="padding: 8px 10px; color: #888; line-height: 1.5;">
-                                <div v-for="(subMsg, idx) in msg.forwardData.list.slice(0, 3)" :key="idx" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
-                                    {{ subMsg.name }}: {{ subMsg.content }}
-                                </div>
-                                <div v-if="msg.forwardData.list.length > 3">...</div>
+                        </div>
+                    </div>
+
+                    <!-- 新增：动态分享消息 -->
+                    <div v-else-if="msg.type === 'moment_share'" class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
+                        <div class="chat-avatar-small" :class="getMessageFrame(msg)" :style="{ backgroundImage: 'url(' + getMessageAvatar(msg) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; flex-direction: column;" :style="{ alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }">
+                            <div v-if="getCurrentChat().isGroup" style="font-size: 12px; color: #888; margin-bottom: 5px;" :style="{ marginLeft: msg.role !== 'user' ? '4px' : '0', marginRight: msg.role === 'user' ? '4px' : '0' }">{{ msg.role !== 'user' ? msg.customName : (getCurrentChat().userGroupNickname || qqData.selfName || '我') }}</div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                                <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
+                                <div class="chat-bubble"
+                                     @touchstart="handleMsgTouchStart($event, index)"
+                                     @touchend="handleMsgTouchEnd"
+                                     @contextmenu.prevent="showContextMenu($event, index)"
+                                     @click.stop="openMomentDetail(msg)"
+                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; overflow: hidden; background: white; border: 1px solid #ddd; width: 220px; cursor: pointer;"
+                                 >
+                                    <div style="padding: 10px; display: flex; align-items: center;">
+                                        <div style="flex: 1; overflow: hidden;">
+                                            <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 13 / 16) + 'px' }" style="color: #555; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
+                                                <strong>@{{ msg.momentData.author.name }}</strong>: {{ msg.momentData.content || '分享图片' }}
+                                            </div>
+                                        </div>
+                                        <div v-if="msg.momentData.images && msg.momentData.images.length > 0" 
+                                             :style="{ backgroundImage: 'url(' + msg.momentData.images[0] + ')' }"
+                                             style="width: 40px; height: 40px; background-size: cover; background-position: center; border-radius: 4px; margin-left: 10px; flex-shrink: 0;">
+                                        </div>
+                                    </div>
+                                    <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px' }" style="padding: 5px 10px; border-top: 1px solid #eee; color: #aaa;">
+                                        动态分享
+                                    </div>
+                                 </div>
                             </div>
-                            <div :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px' }" style="padding: 5px 10px; border-top: 1px solid #eee; color: #aaa;">
-                                聊天记录
-                            </div>
-                         </div>
+                        </div>
                     </div>
 
                     <!-- 正常文字 -->
                     <div v-else class="chat-message" :class="msg.role === 'user' ? 'me' : 'ai'" style="position: relative;">
-                        <div class="chat-avatar-small" :class="msg.role === 'user' ? getCurrentChat().userAvatarFrame : getCurrentChat().aiAvatarFrame" :style="{ backgroundImage: 'url(' + (msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
-                        <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
-                            <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
-                            <!-- ✅ 添加 message-bubble 类和 content 子元素以支持CSS自定义 -->
-                            <div :class="['message-bubble', msg.role === 'user' ? 'user' : 'ai']">
-                                <div class="content"
-                                     @touchstart="handleMsgTouchStart($event, index)"
-                                     @touchend="handleMsgTouchEnd"
-                                     @touchcancel="handleMsgTouchEnd"
-                                     @contextmenu.prevent="showContextMenu($event, index)"
-                                     :style="!getCurrentChat().customCSS ? (msg.role === 'user' ? 'background: var(--accent-color); color: #fff; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;' : 'background: #fff; color: #000; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;') : 'font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;'"
+                        <div class="chat-avatar-small" :class="getMessageFrame(msg)" :style="{ backgroundImage: 'url(' + getMessageAvatar(msg) + ')', width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px' }"></div>
+                        <div style="display:flex; flex-direction: column;" :style="{ alignItems: msg.role === 'user' ? 'flex-end' : 'flex-start' }">
+                            <div v-if="getCurrentChat().isGroup" style="font-size: 12px; color: #888; margin-bottom: 5px; display: flex; align-items: center;" :style="{ marginLeft: msg.role !== 'user' ? '4px' : '0', marginRight: msg.role === 'user' ? '4px' : '0' }">
+                                <span v-if="getMemberRoleInfo(getCurrentChat(), msg)" :style="getMemberRoleInfo(getCurrentChat(), msg).style" style="font-size: 10px; padding: 0 4px; border-radius: 4px; margin-right: 4px; line-height: 1.4;">{{ getMemberRoleInfo(getCurrentChat(), msg).text }}</span>
+                                <span>{{ msg.role !== 'user' ? msg.customName : (getCurrentChat().userGroupNickname || qqData.selfName || '我') }}</span>
+                            </div>
+                            <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
+                                <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
+                                <!-- ✅ 添加 message-bubble 类和 content 子元素以支持CSS自定义 -->
+                                <div :class="['message-bubble', msg.role === 'user' ? 'user' : 'ai', getMemberBubbleClass(msg)]"
+                                     :style="hasMemberCustomStyle(msg) ? 'background: transparent !important; padding: 0 !important; box-shadow: none !important; border: none !important;' : ''">
+                                    <div class="content"
+                                        @touchstart="handleMsgTouchStart($event, index)"
+                                        @touchend="handleMsgTouchEnd"
+                                        @touchcancel="handleMsgTouchEnd"
+                                        @contextmenu.prevent="showContextMenu($event, index)"
+                                        :style="(!getCurrentChat().customCSS && !hasMemberCustomStyle(msg)) ? (msg.role === 'user' ? 'background: var(--accent-color); color: #fff; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;' : 'background: #fff; color: #000; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;') : 'font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;'"
 
-                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none;"
-                                >{{ msg.content }}</div>
+                                        style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none;"
+                                    >
+                                        <div v-if="msg.quote" style="background: rgba(0,0,0,0.1); padding: 4px 8px; border-radius: 4px; margin-bottom: 6px; font-size: 0.9em; opacity: 0.8; border-left: 3px solid rgba(0,0,0,0.2);">
+                                            <div style="font-weight: bold; margin-bottom: 2px;">{{ msg.quote.name }}:</div>
+                                            <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px;">{{ msg.quote.content }}</div>
+                                        </div>
+                                        {{ msg.content }}
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -2336,6 +3813,14 @@ const setFrame = (frame) => {
             </div>
 
             <div v-else style="display: flex; flex-direction: column;">
+                <!-- 引用预览条 -->
+                <div v-if="quotingMsg" style="background: #f2f2f2; padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #e0e0e0; font-size: 12px; color: #666;">
+                    <div style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 85%;">
+                        <span style="font-weight: bold;">回复 {{ quotingMsg.name }}:</span> {{ quotingMsg.content }}
+                    </div>
+                    <button @click="cancelQuote" style="border: none; background: none; color: #999; font-size: 16px; padding: 0 5px;">×</button>
+                </div>
+
                 <div style="height: 50px; background: #f5f5f7; border-top: 1px solid #eee; display: flex; align-items: center; overflow-x: auto; white-space: nowrap; padding: 0 10px; gap: 12px; position: relative;" class="scrollbar-hide">
                     
                     <button v-if="canReroll" @click="handleReroll" title="重Roll" style="flex-shrink:0; width:32px; height:32px; background:white; border-radius:50%; border:none; box-shadow:0 1px 3px rgba(0,0,0,0.1); display:flex; justify-content:center; align-items:center;">
@@ -2357,11 +3842,11 @@ const setFrame = (frame) => {
                         </svg>
                     </button>
 
-                    <button @click="openRedPacketModal('redpacket')" title="红包" style="flex-shrink:0; width:32px; height:32px; background:white; border-radius:50%; border:none; box-shadow:0 1px 3px rgba(0,0,0,0.1); display:flex; justify-content:center; align-items:center;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fa9d3b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" ry="2"></rect><line x1="12" y1="5" x2="12" y2="19"></line><path d="M12 9a4 4 0 0 1 0 6"></path></svg>
-                    </button>
-                    <button @click="openRedPacketModal('transfer')" title="转账" style="flex-shrink:0; width:32px; height:32px; background:white; border-radius:50%; border:none; box-shadow:0 1px 3px rgba(0,0,0,0.1); display:flex; justify-content:center; align-items:center;">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f79c1f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                    <button @click="openRedPacketModal(getCurrentChat().isGroup ? 'redpacket' : 'transfer')" 
+                            :title="getCurrentChat().isGroup ? '红包' : '转账'" 
+                            style="flex-shrink:0; width:32px; height:32px; background:white; border-radius:50%; border:none; box-shadow:0 1px 3px rgba(0,0,0,0.1); display:flex; justify-content:center; align-items:center;">
+                        <svg v-if="getCurrentChat().isGroup" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fa9d3b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2" ry="2"></rect><line x1="12" y1="5" x2="12" y2="19"></line><path d="M12 9a4 4 0 0 1 0 6"></path></svg>
+                        <svg v-else width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#f79c1f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"></line><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
                     </button>
                     <button @click="sendVoice" title="语音" style="flex-shrink:0; width:32px; height:32px; background:white; border-radius:50%; border:none; box-shadow:0 1px 3px rgba(0,0,0,0.1); display:flex; justify-content:center; align-items:center;">
                         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#666" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" y1="19" x2="12" y2="23"></line><line x1="8" y1="23" x2="16" y2="23"></line></svg>
@@ -2392,7 +3877,7 @@ const setFrame = (frame) => {
                 </div>
                 <div class="chat-input-bar" style="align-items: flex-end; padding-top: 8px; padding-bottom: 8px;">
                     <textarea ref="chatInputRef" class="chat-input" v-model="qqData.inputMsg" @keypress.enter="sendUserMessage" placeholder="发消息..." :disabled="qqData.isSending" rows="1" style="resize: none; min-height: 36px; max-height: 120px; padding: 8px 10px; border-radius: 18px; line-height: 20px; overflow-y: auto;"></textarea>
-                    <button class="chat-send-btn" @click="sendUserMessage(null)" :disabled="!qqData.inputMsg.trim()" :style="{ height: '36px', marginBottom: '0', background: qqData.inputMsg.trim() ? 'var(--accent-color)' : null, color: qqData.inputMsg.trim() ? 'white' : null }">发送</button>
+                    <button class="chat-send-btn" @click="sendUserMessage(null)" :disabled="!qqData.inputMsg.trim()" :style="{ height: '36px', marginBottom: '0', borderRadius: '12px', background: qqData.inputMsg.trim() ? 'var(--accent-color)' : null, color: qqData.inputMsg.trim() ? 'white' : null }">发送</button>
                 </div>
             </div>
         </div>
@@ -2457,27 +3942,79 @@ const setFrame = (frame) => {
 
         <!-- 红包/转账 Modal (Ins风) -->
         <div class="modal-overlay" v-if="isRedPacketModalOpen" style="z-index: 2400;" @click.self="isRedPacketModalOpen = false">
-            <div class="modal-content" style="width: 300px; border-radius: 20px; padding: 0; overflow:hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.1);">
-                <div style="padding: 25px 20px; text-align: center;" :style="{ background: redPacketForm.type === 'redpacket' ? 'linear-gradient(135deg, #ffc3a0 0%, #ffafbd 100%)' : 'linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%)' }">
-                    <div v-if="redPacketForm.type === 'redpacket'" style="font-size: 40px; line-height: 1;">🍬</div>
-                    <div v-else style="font-size: 40px; line-height: 1;">
-                        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+            <div class="modal-content" style="width: 320px; border-radius: 20px; padding: 0; overflow:hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.1);">
+                <!-- 单聊转账UI -->
+                <template v-if="!getCurrentChat().isGroup">
+                    <div style="padding: 25px 20px; text-align: center; background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%);">
+                        <div style="font-size: 40px; line-height: 1;">
+                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path></svg>
+                        </div>
+                        <div style="font-size: 18px; font-weight: bold; color: white; margin-top: 10px; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">向好友转账</div>
                     </div>
-                    <div style="font-size: 18px; font-weight: bold; color: white; margin-top: 10px; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">{{ redPacketForm.type === 'redpacket' ? '发送一个甜甜的红包' : '向好友转账' }}</div>
-                </div>
-                <div style="background: #ffffff; padding: 20px 25px 25px;">
-                     <div style="margin-bottom: 15px; position: relative;">
-                        <span style="position: absolute; left: 15px; top: 11px; font-size: 18px; color: #aaa;">¥</span>
-                        <input type="number" v-model="redPacketForm.amount" placeholder="0.00" style="width: 100%; padding: 12px 15px 12px 35px; border: 1px solid #eee; border-radius: 12px; font-size: 20px; font-weight: bold; background: #f9f9f9; text-align: center;">
-                     </div>
-                     <div style="margin-bottom: 20px;">
-                        <input type="text" v-model="redPacketForm.text" :placeholder="redPacketForm.type === 'redpacket' ? '恭喜发财，大吉大利' : '转账说明'" style="width: 100%; padding: 12px 15px; border: 1px solid #eee; border-radius: 12px; font-size: 14px; background: #f9f9f9;">
-                     </div>
-                     <div style="display: flex; gap: 10px; margin-top: 15px;">
-                        <button @click="isRedPacketModalOpen = false" style="flex: 1; padding: 12px; border: 1px solid #eee; background: #f9f9f9; border-radius: 12px; color: #888; font-weight: bold;">取消</button>
-                        <button @click="confirmRedPacket" :style="{ background: redPacketForm.type === 'redpacket' ? 'linear-gradient(135deg, #ffafbd, #ffc3a0)' : 'linear-gradient(135deg, #c2e9fb, #a1c4fd)' }" style="flex: 1; padding: 12px; border: none; color: white; border-radius: 12px; font-weight: bold;">发送</button>
-                     </div>
-                </div>
+                    <div style="background: #ffffff; padding: 20px 25px 25px;">
+                         <div style="margin-bottom: 15px; position: relative;">
+                            <span style="position: absolute; left: 15px; top: 11px; font-size: 18px; color: #aaa;">¥</span>
+                            <input type="number" v-model="redPacketForm.amount" placeholder="0.00" style="width: 100%; padding: 12px 15px 12px 35px; border: 1px solid #eee; border-radius: 12px; font-size: 20px; font-weight: bold; background: #f9f9f9; text-align: center;">
+                         </div>
+                         <div style="margin-bottom: 20px;">
+                            <input type="text" v-model="redPacketForm.text" placeholder="转账说明" style="width: 100%; padding: 12px 15px; border: 1px solid #eee; border-radius: 12px; font-size: 14px; background: #f9f9f9;">
+                         </div>
+                         <div style="display: flex; gap: 10px; margin-top: 15px;">
+                            <button @click="isRedPacketModalOpen = false" style="flex: 1; padding: 12px; border: 1px solid #eee; background: #f9f9f9; border-radius: 12px; color: #888; font-weight: bold;">取消</button>
+                            <button @click="confirmRedPacket" style="background: linear-gradient(135deg, #c2e9fb, #a1c4fd); flex: 1; padding: 12px; border: none; color: white; border-radius: 12px; font-weight: bold;">发送</button>
+                         </div>
+                    </div>
+                </template>
+                <!-- 群聊红包UI -->
+                <template v-else>
+                    <div style="padding: 20px 20px 15px; text-align: center; background: linear-gradient(135deg, #ffc3a0 0%, #ffafbd 100%);">
+                        <div style="font-size: 40px; line-height: 1;">🍬</div>
+                        <div style="font-size: 18px; font-weight: bold; color: white; margin-top: 10px; text-shadow: 0 1px 2px rgba(0,0,0,0.1);">发送一个甜甜的红包</div>
+                    </div>
+                    <div style="background: #ffffff; padding: 15px 20px 20px;">
+                        <div style="display:flex; margin-bottom:15px; background:#f0f0f0; padding:3px; border-radius:8px;">
+                            <div @click="redPacketTab = 'lucky'" :class="{ 'active-tab': redPacketTab === 'lucky' }" style="flex:1; text-align:center; padding:6px; border-radius:6px; font-size:14px; cursor:pointer;">拼手气</div>
+                            <div @click="redPacketTab = 'exclusive'" :class="{ 'active-tab': redPacketTab === 'exclusive' }" style="flex:1; text-align:center; padding:6px; border-radius:6px; font-size:14px; cursor:pointer;">专属红包</div>
+                        </div>
+                        
+                        <!-- 拼手气 -->
+                        <div v-if="redPacketTab === 'lucky'">
+                            <div style="margin-bottom: 12px; position: relative;">
+                                <span style="position: absolute; left: 15px; top: 9px; font-size: 16px; color: #aaa;">总</span>
+                                <input type="number" v-model="redPacketForm.amount" placeholder="总金额" style="width: 100%; padding: 10px 15px 10px 40px; border: 1px solid #eee; border-radius: 10px; font-size: 16px; background: #f9f9f9;">
+                            </div>
+                            <div style="margin-bottom: 12px; position: relative;">
+                                <span style="position: absolute; left: 15px; top: 9px; font-size: 16px; color: #aaa;">个</span>
+                                <input type="number" v-model="redPacketForm.count" placeholder="红包个数" style="width: 100%; padding: 10px 15px 10px 40px; border: 1px solid #eee; border-radius: 10px; font-size: 16px; background: #f9f9f9;">
+                            </div>
+                        </div>
+
+                        <!-- 专属 -->
+                        <div v-if="redPacketTab === 'exclusive'">
+                            <div style="margin-bottom: 12px; max-height: 120px; overflow-y: auto; border: 1px solid #eee; border-radius: 10px; padding: 5px;">
+                                <div v-for="member in getCurrentChat().members.filter(m => !m.isSelf && m.id !== 'self')" :key="member.id" 
+                                     @click="redPacketForm.recipientId = member.id"
+                                     :class="{ 'selected-recipient': redPacketForm.recipientId === member.id }"
+                                     style="display: flex; align-items: center; padding: 8px; border-radius: 6px; cursor: pointer;">
+                                    <div :style="{ backgroundImage: 'url(' + member.avatar + ')' }" style="width: 28px; height: 28px; border-radius: 50%; background-size: cover; margin-right: 8px;"></div>
+                                    <span style="font-size: 14px;">{{ member.groupNickname || member.name }}</span>
+                                </div>
+                            </div>
+                             <div style="margin-bottom: 12px; position: relative;">
+                                <span style="position: absolute; left: 15px; top: 9px; font-size: 18px; color: #aaa;">¥</span>
+                                <input type="number" v-model="redPacketForm.amount" placeholder="金额" style="width: 100%; padding: 10px 15px 10px 35px; border: 1px solid #eee; border-radius: 10px; font-size: 16px; background: #f9f9f9;">
+                             </div>
+                        </div>
+
+                        <div style="margin-bottom: 15px;">
+                            <input type="text" v-model="redPacketForm.text" placeholder="恭喜发财，大吉大利" style="width: 100%; padding: 10px 15px; border: 1px solid #eee; border-radius: 10px; font-size: 14px; background: #f9f9f9;">
+                        </div>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <button @click="isRedPacketModalOpen = false" style="flex: 1; padding: 12px; border: 1px solid #eee; background: #f9f9f9; border-radius: 12px; color: #888; font-weight: bold;">取消</button>
+                            <button @click="confirmRedPacket" style="background: linear-gradient(135deg, #ffafbd, #ffc3a0); flex: 1; padding: 12px; border: none; color: white; border-radius: 12px; font-weight: bold;">发送</button>
+                        </div>
+                    </div>
+                </template>
             </div>
         </div>
 
@@ -2538,7 +4075,7 @@ const setFrame = (frame) => {
                 <div style="display:flex; justify-content: space-around; width: 100%; margin-bottom: 10px;">
                     <div style="display:flex; flex-direction:column; align-items:center;">
                         <div class="qq-setting-avatar" :class="tempQQSettings.aiAvatarFrame" :style="{ backgroundImage: 'url(' + tempQQSettings.avatar + ')' }" @click="triggerAvatarUpload('ai')"></div>
-                        <span style="font-size:12px; color:#666;">对方头像</span>
+                        <span style="font-size:12px; color:#666;">{{ tempQQSettings.isGroup ? '群头像' : '对方头像' }}</span>
                         <button @click="openFrameModal('ai')" style="margin-top:5px; font-size:12px; border:1px solid #ddd; background:white; padding:2px 8px; border-radius:10px; color:#666;">头像框</button>
                     </div>
                     <div style="display:flex; flex-direction:column; align-items:center;">
@@ -2547,11 +4084,43 @@ const setFrame = (frame) => {
                         <button @click="openFrameModal('user')" style="margin-top:5px; font-size:12px; border:1px solid #ddd; background:white; padding:2px 8px; border-radius:10px; color:#666;">头像框</button>
                     </div>
                 </div>
-                <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">本名</span><input type="text" class="modal-input" v-model="tempQQSettings.name" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></div>
+                <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">{{ tempQQSettings.isGroup ? '群名' : '本名' }}</span><input type="text" class="modal-input" v-model="tempQQSettings.name" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></div>
                 <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">备注名</span><input type="text" class="modal-input" v-model="tempQQSettings.remark" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></div>
                 <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">记忆条数</span><input type="number" class="modal-input" v-model.number="tempQQSettings.contextLimit" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></div>
-                <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">对方设定</span><textarea class="qq-textarea" v-model="tempQQSettings.aiPersona" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></textarea></div>
-                <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">我的设定</span><textarea class="qq-textarea" v-model="tempQQSettings.userPersona" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></textarea></div>
+                
+                <div v-if="!tempQQSettings.isGroup">
+                    <div class="input-row"><span class="input-label" style="font-size: 15px; font-weight: bold;">对方设定</span><textarea class="qq-textarea" v-model="tempQQSettings.aiPersona" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></textarea></div>
+                </div>
+                <div v-else>
+                    <div style="margin-bottom: 10px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <span class="input-label" style="font-size: 15px; font-weight: bold;">群成员</span>
+                            <button @click="openAddMemberModal" style="width:24px; height:24px; border-radius:50%; background:var(--accent-color); color:white; border:none; display:flex; align-items:center; justify-content:center; font-size:18px; cursor:pointer;">+</button>
+                        </div>
+                        <div style="background: #f5f5f7; padding: 10px; border-radius: 8px; border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow); max-height: 150px; overflow-y: auto;">
+                            <div v-for="member in tempQQSettings.members" :key="member.id" style="display: flex; align-items: center; margin-bottom: 8px; justify-content: space-between; border-bottom: 1px solid #eee; padding-bottom: 5px;">
+                                <div style="display: flex; align-items: center; flex: 1; min-width: 0;">
+                                    <div :class="member.memberAvatarFrame" :style="{ backgroundImage: 'url(' + getRealtimeMemberAvatar(member.id) + ')' }" style="width: 32px; height: 32px; border-radius: 50%; background-size: cover; margin-right: 8px; flex-shrink: 0; position: relative;"></div>
+                                    <div style="display: flex; flex-direction: column; min-width: 0;">
+                                        <div style="display: flex; align-items: center;">
+                                            <span style="font-size: 13px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ member.groupNickname || member.name }}</span>
+                                            <span v-if="member.role === 'owner'" style="font-size: 10px; color: #ff9500; margin-left: 4px; border: 1px solid #ff9500; padding: 0 2px; border-radius: 2px; flex-shrink: 0;">群主</span>
+                                            <span v-else-if="member.role === 'admin'" style="font-size: 10px; color: #34c759; margin-left: 4px; border: 1px solid #34c759; padding: 0 2px; border-radius: 2px; flex-shrink: 0;">管理</span>
+                                        </div>
+                                        <span v-if="member.title" style="font-size: 10px; color: #888; background: #e0e0e0; padding: 0 4px; border-radius: 4px; width: fit-content; margin-top: 2px;">{{ member.title }}</span>
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 4px; flex-shrink: 0;">
+                                    <button @click="openRoleModal(member)" style="font-size: 10px; padding: 4px 6px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer;">权限</button>
+                                    <button @click="setMemberTitle(member)" style="font-size: 10px; padding: 4px 6px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer;">头衔</button>
+                                    <button @click="openPersonaModal(member)" style="font-size: 10px; padding: 4px 6px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer;">人设</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="input-row" v-if="!tempQQSettings.isGroup"><span class="input-label" style="font-size: 15px; font-weight: bold;">我的设定</span><textarea class="qq-textarea" v-model="tempQQSettings.userPersona" style="border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);"></textarea></div>
                 
                 <!-- 世界书选择 -->
                 <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
@@ -2600,8 +4169,8 @@ const setFrame = (frame) => {
                         <input type="datetime-local" v-model="tempQQSettings.timeOverride" style="display:block; width:100%; height:40px; margin:0; padding:8px; border:1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow); border-radius:6px; box-sizing: border-box; -webkit-appearance: none; background: #fff; font-size: 14px;" />
                     </div>
                 </div>
-                <!-- NPC库入口 -->
-                <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
+                <!-- NPC库入口 (仅单聊显示) -->
+                <div v-if="!tempQQSettings.isGroup" style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                         <span style="font-weight:bold; font-size:15px;">NPC库</span>
                     </div>
@@ -2731,6 +4300,28 @@ const setFrame = (frame) => {
                     </div>
                 </div>
 
+                <!-- 群成员气泡样式 (仅群聊显示) -->
+                <div v-if="tempQQSettings.isGroup" style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
+                    <div style="font-weight:bold; font-size:15px; margin-bottom:10px;">群成员气泡样式</div>
+                    <div style="background: #f5f5f7; padding: 10px; border-radius: 8px; border: 1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);">
+                        <div v-for="member in tempQQSettings.members.filter(m => !m.isSelf && m.id !== 'self')" :key="member.id" style="margin-bottom: 15px; border-bottom: 1px solid #eee; padding-bottom: 10px;">
+                            <div style="display: flex; align-items: center; margin-bottom: 5px;">
+                                <div :style="{ backgroundImage: 'url(' + getRealtimeMemberAvatar(member.id) + ')' }" style="width: 24px; height: 24px; border-radius: 50%; background-size: cover; margin-right: 8px;"></div>
+                                <span style="font-size: 13px; font-weight: bold;">{{ member.groupNickname || member.name }}</span>
+                            </div>
+                            <textarea 
+                                v-model="tempQQSettings.memberBubbleStyles[member.id]" 
+                                class="qq-textarea" 
+                                :placeholder="'.member-bubble-' + member.id + ' .content {\\n  background: #e6f7ff;\\n  color: #0050b3;\\n}'"
+                                style="height: 80px; font-family: 'Courier New', monospace; font-size: 12px;"
+                            ></textarea>
+                        </div>
+                        <div style="font-size: 11px; color: #666; margin-top: 5px;">
+                            提示：使用 .member-bubble-成员ID .content 来为特定成员自定义气泡样式。
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 聊天室背景 -->
                 <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
                     <div style="font-weight:bold; font-size:15px; margin-bottom:10px;">聊天室背景</div>
@@ -2751,7 +4342,7 @@ const setFrame = (frame) => {
                 <div style="margin-top: 15px;">
                     <div style="display:flex; gap:10px;">
                         <button class="modal-btn" style="color: #ff9500; flex:1;" @click="clearChatHistory">清空记录</button>
-                        <button class="modal-btn" style="color: #ff3b30; flex:1;" @click="deleteCurrentChat">删除好友</button>
+                        <button class="modal-btn" style="color: #ff3b30; flex:1;" @click="deleteCurrentChat">{{ getCurrentChat().isGroup ? '解散群组' : '删除好友' }}</button>
                     </div>
                 </div>
                 </div>
@@ -2815,8 +4406,9 @@ const setFrame = (frame) => {
                         还没有表情包，点击右上角“管理”添加
                     </div>
                     <div v-for="(sticker, idx) in qqData.userStickers" :key="idx" @click="sendUserSticker(sticker)"
-                         style="aspect-ratio:1; border:1px solid #eee; border-radius:8px; display:flex; justify-content:center; align-items:center; cursor:pointer; overflow:hidden;">
-                         <img :src="sticker.src" style="max-width:90%; max-height:90%; object-fit:contain;">
+                         style="aspect-ratio:0.85; border:1px solid #eee; border-radius:8px; display:flex; flex-direction:column; justify-content:center; align-items:center; cursor:pointer; overflow:hidden; padding: 4px;">
+                         <img :src="sticker.src" style="max-width:100%; max-height:70%; object-fit:contain; margin-bottom: 2px;">
+                         <span style="font-size: 10px; color: #666; text-align: center; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ sticker.name }}</span>
                     </div>
                 </div>
 
@@ -2868,10 +4460,64 @@ const setFrame = (frame) => {
              <div class="modal-content" style="max-height: 70vh; overflow-y: auto;">
                 <div class="modal-title">选择转发对象</div>
                 <div v-for="chat in qqData.chatList.filter(c => c.id !== qqData.currentChatId)" :key="chat.id" @click="forwardToChat(chat.id)" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; cursor: pointer;">
-                     <div class="qq-avatar" :style="chat.avatar ? { backgroundImage: 'url(' + chat.avatar + ')' } : { width: '30px', height: '30px' }" style="margin-right: 10px;"></div><span>{{ chat.remark || chat.name }}</span>
+                     <div class="qq-avatar" :style="{ backgroundImage: 'url(' + (chat.avatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg') + ')' }" style="width: 30px; height: 30px; margin-right: 10px;"></div><span>{{ chat.remark || chat.name }}</span>
                 </div>
                 <button class="modal-btn cancel" @click="isForwardModalOpen = false" style="margin-top: 10px;">取消</button>
              </div>
+        </div>
+
+        <!-- 转发说说选择 -->
+        <div class="modal-overlay" v-if="isForwardMomentModalOpen" style="z-index: 3100;" @click.self="isForwardMomentModalOpen = false">
+             <div class="modal-content" style="max-height: 70vh; overflow-y: auto;">
+                <div class="modal-title">转发动态给...</div>
+                <div v-for="chat in qqData.chatList" :key="chat.id" @click="confirmForwardMoment(chat.id)" style="padding: 10px; border-bottom: 1px solid #eee; display: flex; align-items: center; cursor: pointer;">
+                     <div class="qq-avatar" :style="{ backgroundImage: 'url(' + (chat.avatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg') + ')' }" style="width: 30px; height: 30px; margin-right: 10px;"></div><span>{{ chat.remark || chat.name }}</span>
+                </div>
+                <button class="modal-btn cancel" @click="isForwardMomentModalOpen = false" style="margin-top: 10px;">取消</button>
+             </div>
+        </div>
+
+        <!-- 动态详情查看器 -->
+        <div v-if="momentDetailModal.visible" class="modal-overlay center-popup" style="z-index: 3200;" @click.self="momentDetailModal.visible = false">
+            <div class="modal-content" style="width: 90%; max-width: 500px; height: 80vh; display: flex; flex-direction: column; padding: 0; overflow: hidden;">
+                <div style="padding: 15px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; background: #fff;">
+                    <span style="font-weight: bold; font-size: 16px;">动态详情</span>
+                    <button @click="momentDetailModal.visible = false" style="border: none; background: none; font-size: 14px; color: #666;">关闭</button>
+                </div>
+                <div style="flex: 1; overflow-y: auto; padding: 15px;">
+                    <div v-if="momentDetailModal.moment">
+                        <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                            <div :style="{ backgroundImage: 'url(' + (momentDetailModal.moment.author.avatar || '') + ')' }" style="width: 40px; height: 40px; border-radius: 50%; background-color: #eee; margin-right: 10px; background-size: cover; background-position: center;"></div>
+                            <div style="flex: 1;">
+                                <div style="font-weight: bold; color: #586b95;">{{ momentDetailModal.moment.author.name }}</div>
+                                <div style="font-size: 12px; color: #999;">{{ momentDetailModal.moment.time }}</div>
+                            </div>
+                        </div>
+                        <div v-if="momentDetailModal.moment.content" style="margin-bottom: 8px; white-space: pre-wrap; line-height: 1.6;">{{ momentDetailModal.moment.content }}</div>
+                        <div v-if="momentDetailModal.moment.images && momentDetailModal.moment.images.length > 0" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; margin-bottom: 8px;">
+                            <div v-for="(img, idx) in momentDetailModal.moment.images" :key="idx" style="padding-top: 100%; position: relative; background-color: #eee; border-radius: 4px; overflow: hidden;">
+                                <img :src="img" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;">
+                            </div>
+                        </div>
+                        <div v-if="momentDetailModal.moment.location" style="font-size: 12px; color: #586b95; margin-bottom: 5px;">📍 {{ momentDetailModal.moment.location }}</div>
+                        
+                        <!-- 点赞和评论区 -->
+                        <div style="background: #f7f7f7; border-radius: 4px; padding: 8px 12px; margin-top: 15px;">
+                            <div v-if="momentDetailModal.moment.likes && momentDetailModal.moment.likes.length > 0" style="padding-bottom: 8px; border-bottom: 1px solid #eee; margin-bottom: 8px; font-size: 14px; color: #586b95; display: flex; align-items: center; flex-wrap: wrap;">
+                                <span style="margin-right: 5px;">❤️</span>
+                                <span>{{ momentDetailModal.moment.likes.join(', ') }}</span>
+                            </div>
+                            <div v-if="momentDetailModal.moment.comments && momentDetailModal.moment.comments.length > 0" style="display: flex; flex-direction: column; gap: 5px; font-size: 14px;">
+                                <div v-for="comment in momentDetailModal.moment.comments" :key="comment.id">
+                                    <strong style="color: #586b95;">{{ comment.author }}: </strong>
+                                    <span>{{ comment.content }}</span>
+                                </div>
+                            </div>
+                            <div v-else style="text-align: center; color: #999; font-size: 12px; padding: 10px;">暂无评论</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <!-- 链接查看器 Modal -->
@@ -2912,8 +4558,13 @@ const setFrame = (frame) => {
                          style="display:flex; width:100%; margin-bottom:8px; align-items:flex-start;"
                          :style="{ flexDirection: item.role === 'user' ? 'row-reverse' : 'row' }">
                         <!-- 头像 -->
-                        <div style="width:36px; height:36px; border-radius:50%; background:#ddd; flex-shrink:0; background-size:cover; background-position:center;"
-                             :style="item.avatar ? { backgroundImage: 'url(' + item.avatar + ')' } : {}"></div>
+                        <div :class="item.frame"
+                             style="border-radius:50%; background:#ddd; flex-shrink:0; background-size:cover; background-position:center;"
+                             :style="{ 
+                                 width: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px', 
+                                 height: ((getCurrentChat().fontSize || 16) * 36 / 16) + 'px',
+                                 backgroundImage: 'url(' + (item.avatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg') + ')' 
+                             }"></div>
                         
                         <!-- 消息气泡 -->
                         <div :style="{ 
@@ -2921,16 +4572,16 @@ const setFrame = (frame) => {
                                  marginRight: item.role === 'user' ? '10px' : '0',
                                  maxWidth: '70%'
                              }">
-                            <div style="font-size:12px; color:#999; margin-bottom:3px;"
+                            <div v-if="forwardViewer.sourceIsGroup" style="font-size:12px; color:#999; margin-bottom:3px;"
                                  :style="{ textAlign: item.role === 'user' ? 'right' : 'left' }">
                                 {{ item.name }}
                             </div>
                             <div :style="{ 
-                                     background: item.role === 'user' ? '#0099ff' : 'white',
-                                     color: '#333',
+                                     background: item.role === 'user' ? 'var(--accent-color)' : 'white',
+                                     color: item.role === 'user' ? 'white' : '#333',
                                      padding: '10px 12px',
                                      borderRadius: '8px',
-                                     fontSize: '14px',
+                                     fontSize: ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px',
                                      lineHeight: '1.4',
                                      wordBreak: 'break-word',
                                      boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
@@ -2963,6 +4614,7 @@ const setFrame = (frame) => {
                 <button @click="menuAction('edit')" style="padding: 10px 16px; border: none; background: white; font-size: 14px; border-right: 1px solid #eee; cursor: pointer;">编辑</button>
                 <button @click="menuAction('copy')" style="padding: 10px 16px; border: none; background: white; font-size: 14px; border-right: 1px solid #eee; cursor: pointer;">复制</button>
                 <button @click="menuAction('retract')" style="padding: 10px 16px; border: none; background: white; font-size: 14px; border-right: 1px solid #eee; cursor: pointer;">撤回</button>
+                <button @click="menuAction('quote')" style="padding: 10px 16px; border: none; background: white; font-size: 14px; border-right: 1px solid #eee; cursor: pointer;">引用</button>
                 <button @click="menuAction('multi')" style="padding: 10px 16px; border: none; background: white; font-size: 14px; cursor: pointer;">多选</button>
             </div>
         </div>
@@ -3013,20 +4665,31 @@ const setFrame = (frame) => {
                     <div v-else>
                         <div v-for="(npc, idx) in tempQQSettings.npcList" :key="idx" 
                              @click="openNpcEdit(idx)"
-                             style="background: #f9f9f9; padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #eee; display: flex; justify-content: space-between; align-items: center; cursor: pointer;">
-                            <div style="flex: 1; min-width: 0; margin-right: 10px;">
+                             style="background: #f9f9f9; padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #eee; display: flex; align-items: center; cursor: pointer;">
+                            <div :style="{ backgroundImage: 'url(' + (npc.avatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg') + ')' }" 
+                                 style="width: 40px; height: 40px; border-radius: 50%; background-size: cover; background-position: center; margin-right: 12px; flex-shrink: 0; background-color: #eee;"></div>
+                            <div style="flex: 1; min-width: 0;">
                                 <div style="font-weight: bold; font-size: 15px; color: #333;">{{ npc.name }}</div>
                                 <div style="font-size: 12px; color: #888; margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">
                                     {{ npc.relation || '暂无关系描述' }}
                                 </div>
                             </div>
-                            <button @click.stop="deleteNpc(idx)" style="background: none; border: none; color: #ff3b30; font-size: 12px; padding: 5px; flex-shrink: 0;">删除</button>
+                            <button @click.stop="deleteNpc(idx)" style="background: none; border: none; color: #ff3b30; font-size: 12px; padding: 5px; flex-shrink: 0; margin-left: 10px;">删除</button>
                         </div>
                     </div>
                 </div>
 
                 <!-- 编辑视图 -->
                 <div v-else style="flex: 1; overflow-y: auto;">
+                    <div style="display: flex; flex-direction: column; align-items: center; margin-bottom: 15px;">
+                        <div :style="{ backgroundImage: 'url(' + (tempNpcData.avatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg') + ')' }" 
+                             style="width: 60px; height: 60px; border-radius: 50%; background-size: cover; background-position: center; margin-bottom: 10px; background-color: #eee;"></div>
+                        <div class="input-row" style="width: 100%;">
+                            <span class="input-label">头像</span>
+                            <input type="text" class="modal-input" v-model="tempNpcData.avatar" placeholder="输入图片链接">
+                        </div>
+                    </div>
+
                     <div class="input-row">
                         <span class="input-label">名字</span>
                         <input type="text" class="modal-input" v-model="tempNpcData.name" placeholder="NPC 名字">
@@ -3103,6 +4766,222 @@ const setFrame = (frame) => {
                      <input type="checkbox" :checked="momentForm.mentions.some(m => m.id === chat.id)" style="margin-left: auto; pointer-events: none;">
                 </div>
                 <button class="modal-btn" @click="isAtUserModalOpen = false" style="margin-top: 10px;">完成</button>
+            </div>
+        </div>
+
+        <!-- 创建群组 Modal -->
+        <div v-if="isGroupCreateOpen" class="modal-overlay center-popup" style="z-index: 3200;" @click.self="isGroupCreateOpen = false">
+            <div class="modal-content" style="max-height: 80vh; display: flex; flex-direction: column;">
+                <div class="modal-title">创建群聊</div>
+                
+                <div class="input-row">
+                    <span class="input-label">群名称</span>
+                    <input type="text" class="modal-input" v-model="groupNameInput" placeholder="请输入群名称">
+                </div>
+
+                <div style="margin-top: 15px; font-weight: bold; font-size: 14px; margin-bottom: 10px;">选择群成员 (至少2人)</div>
+                <div style="flex: 1; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; padding: 5px;">
+                    <div v-for="chat in qqData.chatList.filter(c => !c.isGroup)" :key="chat.id" 
+                         @click="toggleGroupFriendSelection(chat)" 
+                         style="padding: 10px; border-bottom: 1px solid #f5f5f5; display: flex; align-items: center; cursor: pointer;">
+                         <div class="qq-avatar" :style="{ backgroundImage: 'url(' + chat.avatar + ')' }" style="width: 30px; height: 30px; margin-right: 10px;"></div>
+                         <span style="flex: 1;">{{ chat.remark || chat.name }}</span>
+                         <div :style="{
+                             width: '20px', height: '20px', borderRadius: '50%',
+                             border: selectedFriendIds.has(chat.id) ? 'none' : '2px solid #ccc',
+                             background: selectedFriendIds.has(chat.id) ? '#34c759' : 'transparent',
+                             display: 'flex', alignItems: 'center', justifyContent: 'center'
+                         }">
+                            <span v-if="selectedFriendIds.has(chat.id)" style="color:white; font-size:12px;">✓</span>
+                         </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button class="modal-btn cancel" @click="isGroupCreateOpen = false">取消</button>
+                    <button class="modal-btn" @click="createGroup" style="background: #34c759; color: white;">创建 ({{ selectedFriendIds.size }})</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 群成员权限设置 Modal -->
+        <div v-if="isRoleModalOpen" class="modal-overlay center-popup" style="z-index: 3300;" @click.self="isRoleModalOpen = false">
+            <div class="modal-content" style="width: 280px; padding: 20px;">
+                <div class="modal-title" style="text-align: center; margin-bottom: 20px;">权限设置</div>
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <button class="modal-btn" @click="toggleAdmin" style="background: #f5f5f7; color: #333; border: 1px solid #ddd;">
+                        {{ currentMember && currentMember.role === 'admin' ? '取消管理员' : '设定为管理员' }}
+                    </button>
+                    <button class="modal-btn" @click="transferOwner" style="background: #f5f5f7; color: #ff3b30; border: 1px solid #ddd;">
+                        转让群主
+                    </button>
+                </div>
+                <button class="modal-btn cancel" @click="isRoleModalOpen = false" style="margin-top: 15px;">取消</button>
+            </div>
+        </div>
+
+        <!-- 群成员信息编辑 Modal -->
+        <div v-if="isPersonaModalOpen" class="modal-overlay center-popup" style="z-index: 3300;" @click.self="isPersonaModalOpen = false">
+            <div class="modal-content" style="width: 90%; max-width: 500px; height: 70vh; display: flex; flex-direction: column;">
+                <div class="modal-title">编辑成员信息</div>
+                
+                <div style="display:flex; justify-content: center; width: 100%; margin-bottom: 20px;">
+                    <div style="display:flex; flex-direction:column; align-items:center;">
+                        <div class="qq-setting-avatar" :class="tempMemberAvatarFrame" :style="{ backgroundImage: 'url(' + (currentMember ? getRealtimeMemberAvatar(currentMember.id) : '') + ')' }" style="width: 80px; height: 80px; cursor: default;"></div>
+                        <button @click="openMemberFrameModal" style="margin-top:10px; font-size:12px; border:1px solid #ddd; background:white; padding:4px 12px; border-radius:15px; color:#666;">设置头像框</button>
+                    </div>
+                </div>
+
+                <div class="input-row">
+                    <span class="input-label">群昵称</span>
+                    <input type="text" class="modal-input" v-model="tempMemberNickname" placeholder="在群里的昵称">
+                </div>
+
+                <div style="flex: 1; margin-bottom: 15px; display: flex; flex-direction: column;">
+                    <span class="input-label" style="margin-bottom: 5px;">人设</span>
+                    <textarea v-model="tempPersonaText" class="qq-textarea" style="flex: 1; resize: none;" placeholder="请输入该成员的人设..."></textarea>
+                </div>
+                <div style="display: flex; gap: 10px;">
+                    <button class="modal-btn cancel" @click="isPersonaModalOpen = false">取消</button>
+                    <button class="modal-btn" @click="savePersona" style="background: var(--accent-color); color: white;">保存</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 成员头像框选择 Modal -->
+        <div class="modal-overlay" v-if="isMemberFrameModalOpen" @click.self="isMemberFrameModalOpen = false" style="z-index: 3400;">
+            <div class="modal-content">
+                <div class="modal-title">选择头像框</div>
+                <div class="frame-grid">
+                    <div class="frame-option-container" @click="setMemberFrame('')"><div class="frame-preview frame-none"></div><div class="frame-label">无</div></div>
+                    <!-- 预设头像框 -->
+                    <div class="frame-option-container" v-for="(frameUrl, index) in presetFrames" :key="'preset-' + index" @click="setMemberFrame('preset-frame-' + index)">
+                        <div class="frame-preview" :class="'preset-frame-' + index" :style="{ backgroundImage: 'url(' + frameUrl + ')', backgroundSize: 'cover', backgroundPosition: 'center' }"></div>
+                        <div class="frame-label">预设{{ index + 1 }}</div>
+                    </div>
+                    <!-- 自定义头像框 -->
+                    <div class="frame-option-container" v-for="(frameUrl, index) in customFrames" :key="'custom-' + index">
+                        <div class="frame-preview" :class="'custom-frame-' + index" :style="{ backgroundImage: 'url(' + frameUrl + ')', backgroundSize: 'cover', backgroundPosition: 'center' }" @click="setMemberFrame('custom-frame-' + index)"></div>
+                        <div class="frame-label">自定义{{ index + 1 }}</div>
+                    </div>
+                </div>
+                <button class="modal-btn cancel" @click="isMemberFrameModalOpen = false">返回</button>
+            </div>
+        </div>
+
+        <!-- 添加群成员 Modal -->
+        <div v-if="isAddMemberModalOpen" class="modal-overlay center-popup" style="z-index: 3400;" @click.self="isAddMemberModalOpen = false">
+            <div class="modal-content" style="max-height: 80vh; display: flex; flex-direction: column;">
+                <div class="modal-title">添加群成员</div>
+                <div style="flex: 1; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; padding: 5px;">
+                    <div v-for="chat in qqData.chatList.filter(c => !c.isGroup && !tempQQSettings.members.some(m => m.id === c.id))" :key="chat.id" 
+                         @click="toggleNewMemberSelection(chat)" 
+                         style="padding: 10px; border-bottom: 1px solid #f5f5f5; display: flex; align-items: center; cursor: pointer;">
+                         <div class="qq-avatar" :style="{ backgroundImage: 'url(' + chat.avatar + ')' }" style="width: 30px; height: 30px; margin-right: 10px;"></div>
+                         <span style="flex: 1;">{{ chat.remark || chat.name }}</span>
+                         <div :style="{
+                             width: '20px', height: '20px', borderRadius: '50%',
+                             border: selectedNewMemberIds.has(chat.id) ? 'none' : '2px solid #ccc',
+                             background: selectedNewMemberIds.has(chat.id) ? '#34c759' : 'transparent',
+                             display: 'flex', alignItems: 'center', justifyContent: 'center'
+                         }">
+                            <span v-if="selectedNewMemberIds.has(chat.id)" style="color:white; font-size:12px;">✓</span>
+                         </div>
+                    </div>
+                    <div v-if="qqData.chatList.filter(c => !c.isGroup && !tempQQSettings.members.some(m => m.id === c.id)).length === 0" style="text-align:center; padding:20px; color:#999;">
+                        没有可添加的好友
+                    </div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button class="modal-btn cancel" @click="isAddMemberModalOpen = false">取消</button>
+                    <button class="modal-btn" @click="addMembersToGroup" style="background: #34c759; color: white;">添加</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 群公告 Modal -->
+        <div v-if="isAnnouncementModalOpen" class="modal-overlay center-popup" style="z-index: 3500;" @click.self="isAnnouncementModalOpen = false">
+            <div class="modal-content" style="width: 90%; max-width: 400px; display: flex; flex-direction: column;">
+                <div class="modal-title">群公告</div>
+                
+                <div v-if="announcementModalMode === 'view'" style="flex: 1; min-height: 150px; max-height: 60vh; overflow-y: auto; white-space: pre-wrap; line-height: 1.6; color: #333; padding: 10px; background: #f9f9f9; border-radius: 8px; margin-bottom: 15px;">
+                    {{ getCurrentChat().groupAnnouncement || '暂无群公告' }}
+                </div>
+                
+                <div v-else style="flex: 1; margin-bottom: 15px;">
+                    <textarea v-model="tempAnnouncementText" class="qq-textarea" style="height: 200px; resize: none;" placeholder="请输入群公告内容..."></textarea>
+                </div>
+
+                <div style="display: flex; gap: 10px;">
+                    <template v-if="announcementModalMode === 'view'">
+                        <button class="modal-btn cancel" @click="isAnnouncementModalOpen = false">关闭</button>
+                        <button class="modal-btn" @click="setAnnouncementMode('edit')" style="background: var(--accent-color); color: white;">编辑</button>
+                    </template>
+                    <template v-else>
+                        <button class="modal-btn cancel" @click="setAnnouncementMode('view')">取消</button>
+                        <button class="modal-btn" @click="saveAnnouncement" style="background: #34c759; color: white;">发布</button>
+                    </template>
+                </div>
+            </div>
+        </div>
+
+        <!-- 红包领取详情 Modal -->
+        <div v-if="redPacketDetailsModal.visible" class="modal-overlay center-popup red-packet-detail-overlay" @click.self="redPacketDetailsModal.visible = false">
+            <div class="modal-content red-packet-detail-modal">
+                <div class="red-packet-detail__header">
+                    <div class="red-packet-detail__sender">
+                        <img :src="redPacketDetailsModal.msg.role === 'user' ? getCurrentChat().userAvatar : getCurrentChat().avatar" class="red-packet-detail__avatar">
+                        <span class="red-packet-detail__name">{{ redPacketDetailsModal.msg.role === 'user' ? (getCurrentChat().userGroupNickname || qqData.selfName) : (redPacketDetailsModal.msg.customName || getCurrentChat().name) }} 的红包</span>
+                    </div>
+                    <p class="red-packet-detail__greeting">{{ redPacketDetailsModal.msg.packetText }}</p>
+                    <div v-if="(redPacketDetailsModal.msg.claimedUsers.find(u => u.id === 'self') || {}).amount" class="red-packet-detail__amount">
+                        {{ (redPacketDetailsModal.msg.claimedUsers.find(u => u.id === 'self') || {}).amount }} <span class="red-packet-detail__amount--unit">元</span>
+                    </div>
+                    <div v-else class="red-packet-detail__status">红包已被领完</div>
+                </div>
+                <div class="red-packet-detail__summary">
+                    已领取 {{ redPacketDetailsModal.msg.claimedUsers.length }}/{{ redPacketDetailsModal.msg.count }} 个，共 {{ redPacketDetailsModal.msg.amount }} 元
+                </div>
+                <div class="red-packet-detail__list">
+                    <div v-for="user in sortedClaimedUsers" :key="user.id" class="red-packet-detail__item">
+                        <div class="red-packet-detail__item-info">
+                            <img :src="user.avatar" class="red-packet-detail__item-avatar">
+                            <span class="red-packet-detail__item-name">{{ user.name }}</span>
+                        </div>
+                        <span class="red-packet-detail__item-amount">{{ user.amount }} 元</span>
+                    </div>
+                </div>
+                 <button @click="redPacketDetailsModal.visible = false" class="red-packet-detail__close">关闭</button>
+            </div>
+        </div>
+
+        <!-- 动态生成器 Modal -->
+        <div v-if="isMomentGenSettingsOpen" class="modal-overlay center-popup" style="z-index: 3600;" @click.self="isMomentGenSettingsOpen = false">
+            <div class="modal-content" style="max-height: 80vh; display: flex; flex-direction: column;">
+                <div class="modal-title">生成动态</div>
+                
+                <div style="margin-top: 15px; font-weight: bold; font-size: 14px; margin-bottom: 10px;">选择参与生成的角色</div>
+                <div style="flex: 1; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; padding: 5px;">
+                    <div v-for="chat in qqData.chatList.filter(c => !c.isGroup)" :key="chat.id" 
+                         @click="toggleGenFriendSelection(chat)" 
+                         style="padding: 10px; border-bottom: 1px solid #f5f5f5; display: flex; align-items: center; cursor: pointer;">
+                         <div class="qq-avatar" :style="{ backgroundImage: 'url(' + chat.avatar + ')' }" style="width: 30px; height: 30px; margin-right: 10px;"></div>
+                         <span style="flex: 1;">{{ chat.remark || chat.name }}</span>
+                         <div :style="{
+                             width: '20px', height: '20px', borderRadius: '50%',
+                             border: selectedGenFriendIds.has(chat.id) ? 'none' : '2px solid #ccc',
+                             background: selectedGenFriendIds.has(chat.id) ? '#34c759' : 'transparent',
+                             display: 'flex', alignItems: 'center', justifyContent: 'center'
+                         }">
+                            <span v-if="selectedGenFriendIds.has(chat.id)" style="color:white; font-size:12px;">✓</span>
+                         </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button class="modal-btn cancel" @click="isMomentGenSettingsOpen = false">取消</button>
+                    <button class="modal-btn" @click="generateDynamicMoment" style="background: #34c759; color: white;">生成 ({{ selectedGenFriendIds.size }})</button>
+                </div>
             </div>
         </div>
     </div>

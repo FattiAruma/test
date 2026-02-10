@@ -456,10 +456,6 @@ ${selectedRolesContext}
                     <line x1="16.24" y1="7.76" x2="19.07" y2="4.93"></line>
                 </svg>
             </button>
-            <style>
-                @keyframes spin { 100% { transform: rotate(360deg); } }
-                .spin { animation: spin 1s linear infinite; }
-            </style>
             
         </div>
         

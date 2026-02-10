@@ -1160,7 +1160,7 @@ export default {
                         <div style="font-size: 12px; margin-top: 5px;">请先在QQ App中添加好友</div>
                     </div>
                     <div v-for="contact in contacts" :key="contact.id" class="contact-item" @click="selectContact(contact)">
-                        <img :src="contact.avatar || 'data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 width=%2750%27 height=%2750%27%3E%3Crect fill=%27%23ddd%27 width=%2750%27 height=%2750%27/%3E%3Ctext x=%2750%25%27 y=%2750%25%27 dominant-baseline=%27middle%27 text-anchor=%27middle%27 font-size=%2720%27%3E%F0%9F%91%A4%3C/text%3E%3C/svg%3E'" :alt="contact.name" class="contact-avatar">
+                        <img :src="contact.avatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg'" :alt="contact.name" class="contact-avatar">
                         <div class="contact-info">
                             <div class="contact-name">{{ contact.name }}</div>
                             <div class="contact-persona">{{ contact.aiPersona ? contact.aiPersona.substring(0, 30) + '...' : '暂无人设' }}</div>

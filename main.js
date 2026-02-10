@@ -18,11 +18,11 @@ createApp({
         const defaultData = {
             wallpaper: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=1000&auto=format&fit=crop',
             avatar: { img: '', frame: 'frame-pink' },
-            profile: { name: '小手机 <3', bio1: 'Welcome to my world', bio2: '点击下方图标开始聊天' },
-            colors: { app: '#5D4037', widget: '#5D4037', header: '#5D4037', accent: '#007aff' },
+            profile: { name: '你的名字', bio1: 'FT机/FT Phone', bio2: '点击下方图标开始聊天' },
+            colors: { app: '#000000', widget: '#000000', header: '#000000', accent: '#007aff', appNameShadow: 'rgba(0,0,0,0.2)' },
             photos: [
-                'https://images.unsplash.com/photo-1516961642265-531546e84af2?q=80&w=400&auto=format&fit=crop',
-                'https://images.unsplash.com/photo-1529333166437-7750a6dd5a70?q=80&w=400&auto=format&fit=crop'
+                'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg',
+                'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg'
             ],
             desktopApps: {
                 qq: { icon: '🐧', name: 'QQ', img: '' },
@@ -31,7 +31,7 @@ createApp({
                 otomegame: { icon: '🎮', name: '恋爱轮盘', img: '' },
             },
             desktopAppsPage2: {
-                taobao: { icon: '淘', name: '桃Bao', img: '' },
+                taobao: { icon: '🛍️', name: '桃Bao', img: '' },
                 bilibili: { icon: '📺', name: '哔哩哔哩', img: '' },
                 ins: { icon: '📷', name: 'ins', img: '' },
                 musicgame: { icon: '🎵', name: '音游', img: '' },
@@ -50,6 +50,12 @@ createApp({
                 { title: '状态', desc: '心情美美哒 ✨', align: 'center' },
                 { title: '备忘', desc: '记得喝水哦 🥛', align: 'center' }
             ],
+            daysMatter: {
+                leftAvatar: '',
+                rightAvatar: '',
+                title: '相伴',
+                date: new Date().toISOString().split('T')[0] // 默认为今天
+            },
             apiConfig: { endpoint: '', key: '', model: '' },
             modelList: [],
             savedApis: [],
@@ -70,6 +76,7 @@ createApp({
         const desktopAppsPage2 = reactive(JSON.parse(JSON.stringify(defaultData.desktopAppsPage2)));
         const dockApps = reactive(JSON.parse(JSON.stringify(defaultData.dockApps)));
         const textWidgets = reactive(JSON.parse(JSON.stringify(defaultData.textWidgets)));
+        const daysMatter = reactive({ ...defaultData.daysMatter });
         const customFrames = reactive([]);
         const presetFrames = [
             'https://i.postimg.cc/gcNzFt0D/Magic-Eraser-260125-110430.png',
@@ -83,7 +90,15 @@ createApp({
             'https://i.postimg.cc/qR9Bpx2h/Magic_Eraser_260131_201701.png',
             'https://i.postimg.cc/50Z9fS8C/Magic_Eraser_260131_201734.png',
             'https://i.postimg.cc/4dr4XQpH/Magic_Eraser_260131_201821.png',
-            'https://i.postimg.cc/W3Qpsw00/Magic_Eraser_260131_201859.png'
+            'https://i.postimg.cc/W3Qpsw00/Magic_Eraser_260131_201859.png',
+            'https://i.postimg.cc/0y7STqJM/無標題101_20260209201307.png',
+            'https://i.postimg.cc/yYM9pNW4/無標題101_20260209201244.png',
+            'https://i.postimg.cc/qv2KPdCN/無標題101_20260209201805.png',
+            'https://i.postimg.cc/13DFkZNg/無標題101_20260209201912.png',
+            'https://i.postimg.cc/RZxd6d7Y/wu-biao-ti101-20260209202851.png',
+            'https://i.postimg.cc/N0pZkSbf/無標題101_20260209203925.png',
+            'https://i.postimg.cc/15QM4McJ/wu-biao-ti101-20260209203151.png',
+            'https://i.postimg.cc/KYMmqZkz/Magic_Eraser_260205_150253.png'
         ];
         
         const apiConfig = reactive({ ...defaultData.apiConfig });
@@ -151,6 +166,7 @@ createApp({
         const fileInput = ref(null);
         const tempText = reactive({ title: '', desc: '', align: 'left', index: null });
         const tempInputVal = ref('');
+        const tempDate = ref(''); // 用于日期选择
         const editTargetKey = ref('');
         const editTargetLabel = ref('');
         
@@ -158,6 +174,19 @@ createApp({
         const isDataLoaded = ref(false);
 
         const allApps = computed(() => ({ ...desktopApps, ...desktopAppsPage2, ...dockApps }));
+
+        // 计算纪念日天数
+        const daysCount = computed(() => {
+            const start = new Date(daysMatter.date);
+            const now = new Date();
+            // 重置时间部分以仅比较日期
+            start.setHours(0, 0, 0, 0);
+            now.setHours(0, 0, 0, 0);
+            
+            const diffTime = Math.abs(now - start);
+            const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+            return diffDays;
+        });
 
         const wallpapers = reactive({
             menu: computed(() => wallpaper.value),
@@ -247,6 +276,7 @@ createApp({
                          }
                     }
 
+                    if(data.daysMatter) Object.assign(daysMatter, data.daysMatter);
                     if(data.textWidgets) textWidgets.splice(0, textWidgets.length, ...data.textWidgets);
                     if(data.apiConfig) Object.assign(apiConfig, data.apiConfig);
                     if(data.modelList) modelList.value = data.modelList;
@@ -296,6 +326,7 @@ createApp({
                 const dataToSave = {
                     wallpaper: wallpaper.value, avatar: avatar, profile: profile, colors: colors,
                     photos: photos, desktopApps: desktopApps, desktopAppsPage2: desktopAppsPage2, dockApps: dockApps, textWidgets: textWidgets,
+                    daysMatter: daysMatter,
                     apiConfig: apiConfig, modelList: modelList.value, savedApis: savedApis.value,
                     // QQ 数据打包
                     qqChats: qqData.chatList,
@@ -441,11 +472,6 @@ createApp({
             root.style.setProperty('--accent-color', color);
             
             // 简单的变暗处理用于渐变
-            // 这里简单处理，如果需要更精确的颜色操作可以使用库，或者直接用纯色
-            // 为了保持简单，我们这里直接设置一个稍微变暗的颜色变量，或者直接让 CSS 使用 color-mix
-            // 但为了兼容性，我们可以在这里计算一个简单的 hex 变暗
-            // 简单起见，我们让 CSS 使用 color-mix 或者直接用纯色代替渐变，或者只改变主色
-            // 这里我们尝试计算一个 darken 颜色
             try {
                 let r = parseInt(color.substring(1, 3), 16);
                 let g = parseInt(color.substring(3, 5), 16);
@@ -465,21 +491,29 @@ createApp({
                 root.style.setProperty('--accent-color-shadow', color); // Fallback
             }
         };
+        
+        // 更新文字样式 CSS 变量
+        const updateTextStyles = () => {
+            const root = document.documentElement;
+            root.style.setProperty('--app-name-color', colors.app || '#5D4037');
+            root.style.setProperty('--app-name-shadow-color', colors.appNameShadow || 'rgba(0,0,0,0.2)');
+        };
 
         // 监听变化自动保存
-        watch([wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets, customFrames, apiConfig, modelList, savedApis, qqData, taobaoData], () => {
+        watch([wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets, daysMatter, customFrames, apiConfig, modelList, savedApis, qqData, taobaoData], () => {
             saveData();
         }, { deep: true });
         
         // 监听颜色变化更新 CSS
-        watch(() => colors.accent, () => {
-            updateAccentColor();
-        });
+        watch(() => colors.accent, updateAccentColor);
+        watch([() => colors.app, () => colors.appNameShadow], updateTextStyles);
+
 
         // 挂载时读取并生成样式
         onMounted(() => {
             loadData();
             updateAccentColor();
+            updateTextStyles();
             setTimeout(() => generateFrameStyles(), 100);
             
             // 添加滑动事件监听
@@ -575,6 +609,8 @@ createApp({
             if (uploadTargetType.value === 'avatar') avatar.img = url;
             else if (uploadTargetType.value === 'wallpaper') wallpaper.value = url;
             else if (uploadTargetType.value === 'photo') photos[uploadTargetIndex.value] = url;
+            else if (uploadTargetType.value === 'days-left') daysMatter.leftAvatar = url;
+            else if (uploadTargetType.value === 'days-right') daysMatter.rightAvatar = url;
             else if (uploadTargetType.value === 'icon') {
                 const key = uploadTargetIndex.value;
                 if (desktopApps[key]) desktopApps[key].img = url;
@@ -644,6 +680,17 @@ createApp({
         const openSingleEdit = (key, label) => { editTargetKey.value = key; editTargetLabel.value = label; tempInputVal.value = profile[key]; activeModal.value = 'singleEdit'; };
         const saveSingleEdit = () => { if (editTargetKey.value) profile[editTargetKey.value] = tempInputVal.value; activeModal.value = null; };
         
+        const openDaysEdit = () => { 
+            tempInputVal.value = daysMatter.title; 
+            tempDate.value = daysMatter.date;
+            activeModal.value = 'daysEdit'; 
+        };
+        const saveDaysEdit = () => {
+            daysMatter.title = tempInputVal.value;
+            daysMatter.date = tempDate.value;
+            activeModal.value = null;
+        };
+
         const openTextEdit = (index) => { const w = textWidgets[index]; tempText.title = w.title; tempText.desc = w.desc; tempText.align = w.align || 'left'; tempText.index = index; activeModal.value = 'textEdit'; };
         const saveTextEdit = () => { const i = tempText.index; textWidgets[i].title = tempText.title; textWidgets[i].desc = tempText.desc; textWidgets[i].align = tempText.align; activeModal.value = null; };
         
@@ -697,13 +744,13 @@ createApp({
         return {
             wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets,
             isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen, isWorldbookOpen, isSavedataOpen, isTaobaoOpen, isAnonymousboxOpen, isCheckphoneOpen,
-            activeModal, tempText, tempInputVal, editTargetLabel, fileInput,
-            apiConfig, modelList, savedApis, qqData, themeState, taobaoData,
+            activeModal, tempText, tempInputVal, tempDate, editTargetLabel, fileInput,
+            apiConfig, modelList, savedApis, qqData, themeState, taobaoData, daysMatter, daysCount,
             uploadTargetType, uploadTargetIndex, customFrames, presetFrames,
             currentPage,
             screensContainerStyle, // 导出样式
             handleAppClick, handleFileChange, handleLinkUpload, triggerFileUpload,
-            openImageModal, setFrame, addCustomFrame, deleteCustomFrame, openTextEdit, saveTextEdit, openSingleEdit, saveSingleEdit,
+            openImageModal, setFrame, addCustomFrame, deleteCustomFrame, openTextEdit, saveTextEdit, openSingleEdit, saveSingleEdit, openDaysEdit, saveDaysEdit,
             getFlexAlign, handleThemeUpload, resetBeautify, handleFrameAction
         };
     }

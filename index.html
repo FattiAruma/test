@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>我的小空间</title>
+    <title>FT Phone</title>
 
     <link rel="stylesheet" href="style.css">
     <!-- 引入 Vue -->
@@ -27,7 +27,7 @@
                     <!-- 桌面顶部 -->
                     <div class="widget-area">
                         <div class="avatar" :class="avatar.frame" :style="avatar.img ? { backgroundImage: 'url(' + avatar.img + ')' } : {}" @click="activeModal = 'image'; uploadTargetType = 'avatar'">
-                            <span v-if="!avatar.img">🎀</span>
+                            <span v-if="!avatar.img">FT</span>
                         </div>
                         <div class="user-name" :style="{ color: colors.header }" @click="openSingleEdit('name', '名字')">{{ profile.name }}</div>
                         <div class="user-bio" :style="{ color: colors.header }" @click="openSingleEdit('bio1', '第一行简介')">{{ profile.bio1 }}</div>
@@ -57,7 +57,23 @@
                 <div class="screen">
                     <div class="layout-container">
                         <!-- 第二页内容 -->
-                        <div class="glass-box" style="grid-column: 1 / span 2; grid-row: 1 / span 2;"></div>
+                        <div class="glass-box days-matter-widget" style="grid-column: 1 / span 2; grid-row: 1 / span 2;">
+                            <div class="days-avatars">
+                                <div class="days-avatar" :style="daysMatter.leftAvatar ? { backgroundImage: 'url(' + daysMatter.leftAvatar + ')' } : {}" @click="activeModal = 'image'; uploadTargetType = 'days-left'">
+                                    <span v-if="!daysMatter.leftAvatar">?</span>
+                                </div>
+                                <div class="days-avatar" :style="daysMatter.rightAvatar ? { backgroundImage: 'url(' + daysMatter.rightAvatar + ')' } : {}" @click="activeModal = 'image'; uploadTargetType = 'days-right'">
+                                    <span v-if="!daysMatter.rightAvatar">?</span>
+                                </div>
+                            </div>
+                            <div class="days-content" @click="openDaysEdit">
+                                <div class="days-title-box">{{ daysMatter.title }}</div>
+                                <div class="days-count-box">
+                                    <span class="days-num">{{ daysCount }}</span>
+                                    <span class="days-unit">Days</span>
+                                </div>
+                            </div>
+                        </div>
 
                         <div class="app-item" style="grid-column: 3; grid-row: 1;" @click="handleAppClick('taobao')">
                             <div class="app-icon" :style="[desktopAppsPage2.taobao.img ? { backgroundImage: 'url(' + desktopAppsPage2.taobao.img + ')' } : {}, { color: colors.app }]"><span v-if="!desktopAppsPage2.taobao.img">{{ desktopAppsPage2.taobao.icon }}</span></div>
@@ -194,6 +210,21 @@
                 <div class="modal-title">编辑 {{ editTargetLabel }}</div>
                 <input type="text" class="modal-input" v-model="tempInputVal">
                 <button class="modal-btn" style="color: #34c759;" @click="saveSingleEdit">✅ 保存</button>
+                <button class="modal-btn cancel" @click="activeModal = null">取消</button>
+            </div>
+        </div>
+
+        <!-- 纪念日编辑弹窗 -->
+        <div class="modal-overlay" v-if="activeModal === 'daysEdit'" @click.self="activeModal = null">
+            <div class="modal-content">
+                <div class="modal-title">编辑纪念日</div>
+                <div class="text-input-group">
+                    <div class="input-label">标题</div>
+                    <input type="text" class="modal-input" v-model="tempInputVal" placeholder="例如：相伴">
+                    <div class="input-label" style="margin-top: 10px;">起始日期</div>
+                    <input type="date" class="modal-input" v-model="tempDate">
+                </div>
+                <button class="modal-btn" style="color: #34c759;" @click="saveDaysEdit">✅ 保存修改</button>
                 <button class="modal-btn cancel" @click="activeModal = null">取消</button>
             </div>
         </div>
