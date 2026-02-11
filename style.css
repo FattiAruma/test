@@ -1842,3 +1842,163 @@ body {
 .spinning-gear {
     animation: spin 1.5s linear infinite;
 }
+
+/* 加载画面样式 */
+#loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: #f2f2f7;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    transition: opacity 0.5s ease;
+}
+
+.loading-text {
+    font-size: 16px;
+    color: #888;
+}
+
+#loading-screen.hidden {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Music Widget Styles */
+.music-widget {
+    color: #6a738f;
+}
+
+.music-search-bar {
+    background: rgba(255, 255, 255, 0.6);
+    border-radius: 20px;
+    padding: 2px 15px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+}
+
+.music-search-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background-image: url('https://i.postimg.cc/C12hJg1p/image.png');
+    background-size: cover;
+    background-position: center;
+    flex-shrink: 0;
+}
+
+.music-search-input {
+    flex-grow: 1;
+    font-size: 13px;
+    font-style: italic;
+    border: none;
+    background: transparent;
+    outline: none;
+    color: inherit;
+}
+
+.music-search-input::placeholder {
+    color: inherit;
+    opacity: 0.8;
+}
+
+.music-search-icon {
+    flex-shrink: 0;
+    color: #8c94ae;
+}
+
+.music-content-area {
+    flex-grow: 1;
+    display: flex;
+    gap: 8px;
+    min-height: 0; /* Fix for flexbox overflow */
+}
+
+.music-main-photo {
+    flex: 2; /* Takes up more space */
+    background-image: url('https://i.postimg.cc/pXWJcM2j/image.png');
+    background-size: cover;
+    background-position: center;
+    border-radius: 12px;
+}
+
+.music-side-panel {
+    flex: 1.2; /* Takes up less space */
+    display: flex;
+    flex-direction: column;
+    gap: 2px; /* Minimal gap to give more space to photo */
+    overflow: hidden; /* Prevent overflow */
+}
+
+.music-side-photo {
+    width: 100%;
+    flex: 1; /* Fill remaining space */
+    min-height: 0; /* Allow shrinking */
+    background-image: url('https://i.postimg.cc/t4x05f88/image.png');
+    background-size: cover;
+    background-position: center;
+    border-radius: 12px;
+}
+
+.music-player-bar {
+    display: flex;
+    flex-direction: column;
+    gap: 1px; /* Minimal internal gap */
+    font-size: 8px;
+    color: #8c94ae;
+    transform: scale(0.75); /* Even smaller */
+    transform-origin: bottom center; /* Scale from bottom to keep it anchored */
+    margin-top: -5px; /* Pull it up slightly due to scaling */
+    padding-bottom: 0;
+}
+
+.music-player-progress-bg {
+    width: 100%;
+    height: 3px;
+    background-color: rgba(255, 255, 255, 0.5);
+    border-radius: 2px;
+    position: relative;
+    margin-top: 2px;
+}
+
+.music-player-progress-fg {
+    width: 30%; /* Example progress */
+    height: 100%;
+    background-color: #aab2ce;
+    border-radius: 2px;
+}
+
+.music-player-handle {
+    position: absolute;
+    top: 50%;
+    left: 30%;
+    transform: translate(-50%, -50%);
+    font-size: 12px;
+    width: 12px;
+    height: 12px;
+    background-color: #fff;
+    border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+.music-player-time {
+    display: flex;
+    justify-content: space-between;
+}
+
+.music-player-controls {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    color: #8c94ae;
+}
+
+.music-player-controls svg:nth-child(2) {
+    transform: scale(1.3); /* Make play button bigger */
+}

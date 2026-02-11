@@ -10,25 +10,31 @@ import SavedataApp from './apps/SavedataApp.js';
 import TaobaoApp from './apps/TaobaoApp.js';
 import AnonymousboxApp from './apps/AnonymousboxApp.js';
 import CheckphoneApp from './apps/CheckphoneApp.js';
+import StoryApp from './apps/StoryApp.js';
 
 createApp({
-    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp, OtomegameApp, WorldbookApp, SavedataApp, TaobaoApp, AnonymousboxApp, CheckphoneApp },
+    components: { QQApps, SettingsApp, ThemeApps, TypefaceApp, OtomegameApp, WorldbookApp, SavedataApp, TaobaoApp, AnonymousboxApp, CheckphoneApp, StoryApp },
     setup() {
         // === 1. 定义默认数据 ===
         const defaultData = {
-            wallpaper: 'https://images.unsplash.com/photo-1550684848-fac1c5b4e853?q=80&w=1000&auto=format&fit=crop',
+            wallpaper: 'https://i.postimg.cc/KvC2dfXP/IMG-5707.jpg',
             avatar: { img: '', frame: 'frame-pink' },
             profile: { name: '你的名字', bio1: 'FT机/FT Phone', bio2: '点击下方图标开始聊天' },
             colors: { app: '#000000', widget: '#000000', header: '#000000', accent: '#007aff', appNameShadow: 'rgba(0,0,0,0.2)' },
             photos: [
-                'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg',
-                'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg'
+                'https://i.postimg.cc/Vsxwh4Pf/wu-biao-ti103-20260210200947.png',
+                'https://i.postimg.cc/Vsxwh4Pf/wu-biao-ti103-20260210200947.png'
             ],
+            musicWidget: {
+                avatar: 'https://i.postimg.cc/Vsxwh4Pf/wu-biao-ti103-20260210200947.png',
+                mainPhoto: 'https://i.postimg.cc/Vsxwh4Pf/wu-biao-ti103-20260210200947.png',
+                sidePhoto: 'https://i.postimg.cc/Vsxwh4Pf/wu-biao-ti103-20260210200947.png'
+            },
             desktopApps: {
                 qq: { icon: '🐧', name: 'QQ', img: '' },
                 world: { icon: '📕', name: '世界书', img: '' },
                 phone: { icon: '📱', name: '查手机', img: '' },
-                otomegame: { icon: '🎮', name: '恋爱轮盘', img: '' },
+                otomegame: { icon: '💌', name: '恋爱轮盘', img: '' },
             },
             desktopAppsPage2: {
                 taobao: { icon: '🛍️', name: '桃Bao', img: '' },
@@ -63,6 +69,7 @@ createApp({
             anonymousUsername: '点击修改昵称',
             anonymousPosts: []
         };
+        const musicWidget = reactive({ ...defaultData.musicWidget });
 
         // === 2. 响应式状态 ===
         // 尝试从 localStorage 同步读取壁纸，以避免刷新时的闪烁
@@ -137,6 +144,7 @@ createApp({
         const isTaobaoOpen = ref(false);
         const isAnonymousboxOpen = ref(false);
         const isCheckphoneOpen = ref(false);
+        const isStoryAppOpen = ref(false);
 
         // 页面滑动
         const currentPage = ref(0);
@@ -299,6 +307,8 @@ createApp({
                     if(data.qqVisitorCount) qqData.visitorCount = data.qqVisitorCount;
                     // 新增：恢复说说列表
                     if(data.qqMomentsList) qqData.momentsList = data.qqMomentsList;
+                    // 新增：恢复日志列表
+                    if(data.qqLogs) qqData.logs = data.qqLogs;
                     // 修正：确保 qqData.anonymousConfigs 被正确赋值
                     if(data.qqAnonymousConfigs) qqData.anonymousConfigs = data.qqAnonymousConfigs;
 
@@ -338,6 +348,7 @@ createApp({
                     qqSelfName: qqData.selfName,
                     qqVisitorCount: qqData.visitorCount,
                     qqMomentsList: qqData.momentsList,
+                    qqLogs: qqData.logs,
                     // 匿名箱数据
                     anonymousConfigs: qqData.anonymousConfigs,
                     anonymousUsername: qqData.anonymousUsername,
@@ -510,8 +521,15 @@ createApp({
 
 
         // 挂载时读取并生成样式
-        onMounted(() => {
-            loadData();
+        onMounted(async () => {
+            await loadData();
+
+            // 数据加载完成后，隐藏加载画面
+            const loadingScreen = document.getElementById('loading-screen');
+            if (loadingScreen) {
+                loadingScreen.classList.add('hidden');
+            }
+
             updateAccentColor();
             updateTextStyles();
             setTimeout(() => generateFrameStyles(), 100);
@@ -583,6 +601,7 @@ createApp({
             else if (key === 'taobao') isTaobaoOpen.value = true;
             else if (key === 'mailbox') isAnonymousboxOpen.value = true;
             else if (key === 'phone') isCheckphoneOpen.value = true;
+            else if (key === 'novel') isStoryAppOpen.value = true;
         };
 
         // === 4. 强制链接上传逻辑 ===
@@ -609,6 +628,9 @@ createApp({
             if (uploadTargetType.value === 'avatar') avatar.img = url;
             else if (uploadTargetType.value === 'wallpaper') wallpaper.value = url;
             else if (uploadTargetType.value === 'photo') photos[uploadTargetIndex.value] = url;
+            else if (uploadTargetType.value === 'music-avatar') musicWidget.avatar = url;
+            else if (uploadTargetType.value === 'music-main') musicWidget.mainPhoto = url;
+            else if (uploadTargetType.value === 'music-side') musicWidget.sidePhoto = url;
             else if (uploadTargetType.value === 'days-left') daysMatter.leftAvatar = url;
             else if (uploadTargetType.value === 'days-right') daysMatter.rightAvatar = url;
             else if (uploadTargetType.value === 'icon') {
@@ -743,7 +765,8 @@ createApp({
 
         return {
             wallpaper, avatar, profile, colors, photos, desktopApps, desktopAppsPage2, dockApps, textWidgets,
-            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen, isWorldbookOpen, isSavedataOpen, isTaobaoOpen, isAnonymousboxOpen, isCheckphoneOpen,
+            musicWidget,
+            isQQOpen, isSettingsOpen, isBeautifyOpen, isFontOpen, isOtomegameOpen, isWorldbookOpen, isSavedataOpen, isTaobaoOpen, isAnonymousboxOpen, isCheckphoneOpen, isStoryAppOpen,
             activeModal, tempText, tempInputVal, tempDate, editTargetLabel, fileInput,
             apiConfig, modelList, savedApis, qqData, themeState, taobaoData, daysMatter, daysCount,
             uploadTargetType, uploadTargetIndex, customFrames, presetFrames,

@@ -24,9 +24,13 @@ export default {
         const isSummarizing = ref(false);
         const chatInputRef = ref(null);
 
-        const contextMenu = reactive({ visible: false, x: 0, y: 0, msgIndex: -1 });
+        // 虚拟列表/分页状态
+        const displayedMsgCount = ref(50);
+        const isLoadingMore = ref(false);
+
+        const contextMenu = reactive({ visible: false, x: 0, y: 0, targetMsg: null });
         const isMultiSelectMode = ref(false);
-        const selectedMsgIndices = ref(new Set());
+        const selectedMessages = ref(new Set()); // 改为存储消息对象
         const isForwardModalOpen = ref(false);
         
         const isLocationModalOpen = ref(false); 
@@ -56,6 +60,55 @@ export default {
             if (!redPacketDetailsModal.msg || !redPacketDetailsModal.msg.claimedUsers) return [];
             return [...redPacketDetailsModal.msg.claimedUsers].sort((a, b) => parseFloat(b.amount) - parseFloat(a.amount));
         });
+
+        // 新增：置顶排序后的好友列表
+        const sortedChatList = computed(() => {
+            if (!props.qqData.chatList) return [];
+            return [...props.qqData.chatList].sort((a, b) => {
+                // 置顶的排在前面
+                if (a.isPinned && !b.isPinned) return -1;
+                if (!a.isPinned && b.isPinned) return 1;
+                // 否则保持原顺序 (或者按时间排序，这里假设原顺序就是时间倒序)
+                return 0;
+            });
+        });
+
+        // 新增：滑动置顶相关方法
+        const handleTouchStart = (e, chatId) => {
+            touchStartX.value = e.touches[0].clientX;
+            touchCurrentX.value = touchStartX.value;
+            isDragging.value = true;
+        };
+
+        const handleTouchMove = (e, chatId) => {
+            if (!isDragging.value) return;
+            touchCurrentX.value = e.touches[0].clientX;
+            
+            // 如果向左滑动超过一定距离，显示菜单
+            if (touchStartX.value - touchCurrentX.value > 30) {
+                // 阻止默认滚动
+                // e.preventDefault(); // 注意：在某些浏览器可能需要 passive: false
+                if (swipedChatId.value !== chatId) {
+                    swipedChatId.value = chatId;
+                }
+            } else if (touchCurrentX.value - touchStartX.value > 30) {
+                // 向右滑动，关闭菜单
+                swipedChatId.value = null;
+            }
+        };
+
+        const handleTouchEnd = (e) => {
+            isDragging.value = false;
+            // 如果滑动距离不够，恢复原状
+            if (touchStartX.value - touchCurrentX.value < 30 && touchCurrentX.value - touchStartX.value < 30) {
+                // 点击事件会触发，这里不做处理
+            }
+        };
+
+        const togglePin = (chat) => {
+            chat.isPinned = !chat.isPinned;
+            swipedChatId.value = null; // 操作后关闭菜单
+        };
 
         // 新增：链接功能状态
         const isLinkModalOpen = ref(false);
@@ -103,6 +156,9 @@ export default {
         const tempNpcData = reactive({ name: '', setting: '', relation: '', avatar: '' });
         const editingNpcIndex = ref(-1);
 
+        // 新增：好友连接功能状态
+        const isFriendConnectModalOpen = ref(false);
+
         // 新增：说说（动态）功能状态
         const isPublishMomentOpen = ref(false);
         const momentForm = reactive({
@@ -118,6 +174,17 @@ export default {
         const isMomentGenSettingsOpen = ref(false);
         const selectedGenFriendIds = ref(new Set());
         const isGeneratingMoment = ref(false);
+
+        // 新增：滑动置顶功能状态
+        const swipedChatId = ref(null);
+        const touchStartX = ref(0);
+        const touchCurrentX = ref(0);
+        const isDragging = ref(false);
+
+        // --- 新增：日志/日记功能状态 ---
+        const isLogViewerOpen = ref(false); // 日志主界面（查看和编辑）
+        const isLogListOpen = ref(false);   // 日志历史列表
+        const currentLog = reactive({ id: null, date: '', content: '' }); // 当前日志对象
 
         // --- 群组功能状态 ---
         const isGroupCreateOpen = ref(false);
@@ -159,7 +226,8 @@ export default {
                 role: 'member', // member, admin, owner
                 title: '',
                 groupNickname: '',
-                memberAvatarFrame: ''
+                memberAvatarFrame: '',
+                isMuted: false
             }));
 
             // 将自己添加为群主
@@ -172,7 +240,8 @@ export default {
                 title: '',
                 isSelf: true,
                 groupNickname: '',
-                memberAvatarFrame: ''
+                memberAvatarFrame: '',
+                isMuted: false
             });
 
             const newChat = {
@@ -203,6 +272,7 @@ export default {
                 aiAvatarFrame: '',
                 userAvatarFrame: '',
                 npcList: [],
+                connectedFriends: {}, // 新增：好友连接
                 groupAnnouncement: ''
             };
 
@@ -265,6 +335,73 @@ export default {
             isRoleModalOpen.value = false;
         };
 
+        const toggleMuteMember = () => {
+            if (!currentMember.value) return;
+            
+            // 权限检查
+            const selfMember = tempQQSettings.members.find(m => m.isSelf || m.id === 'self');
+            if (!selfMember) return;
+
+            const selfRole = selfMember.role;
+            const targetRole = currentMember.value.role;
+
+            if (selfRole === 'member') {
+                alert("你没有权限执行此操作");
+                return;
+            }
+
+            if (selfRole === 'admin' && (targetRole === 'owner' || targetRole === 'admin')) {
+                alert("你不能禁言群主或管理员");
+                return;
+            }
+
+            currentMember.value.isMuted = !currentMember.value.isMuted;
+            
+            if (tempQQSettings.isGroup) {
+                if (!tempQQSettings.pendingSystemMessages) tempQQSettings.pendingSystemMessages = [];
+                const operatorName = tempQQSettings.userGroupNickname || props.qqData.selfName || '我';
+                const action = currentMember.value.isMuted ? '禁言' : '解除禁言';
+                tempQQSettings.pendingSystemMessages.push(`${operatorName} 将 ${currentMember.value.name} ${action}了`);
+            }
+            isRoleModalOpen.value = false;
+        };
+
+        const kickMember = () => {
+            if (!currentMember.value) return;
+            
+            // 权限检查
+            const selfMember = tempQQSettings.members.find(m => m.isSelf || m.id === 'self');
+            if (!selfMember) return;
+
+            const selfRole = selfMember.role;
+            const targetRole = currentMember.value.role;
+
+            if (selfRole === 'member') {
+                alert("你没有权限执行此操作");
+                return;
+            }
+
+            if (selfRole === 'admin' && (targetRole === 'owner' || targetRole === 'admin')) {
+                alert("你不能踢出群主或管理员");
+                return;
+            }
+
+            if (!confirm(`确定要将 ${currentMember.value.name} 移出群聊吗？`)) return;
+
+            const index = tempQQSettings.members.indexOf(currentMember.value);
+            if (index > -1) {
+                const kickedName = currentMember.value.name;
+                tempQQSettings.members.splice(index, 1);
+                
+                if (tempQQSettings.isGroup) {
+                    if (!tempQQSettings.pendingSystemMessages) tempQQSettings.pendingSystemMessages = [];
+                    const operatorName = tempQQSettings.userGroupNickname || props.qqData.selfName || '我';
+                    tempQQSettings.pendingSystemMessages.push(`${operatorName} 将 ${kickedName} 移出了群聊`);
+                }
+            }
+            isRoleModalOpen.value = false;
+        };
+
         const openPersonaModal = (member) => {
             currentMember.value = member;
             tempPersonaText.value = member.persona || '';
@@ -279,6 +416,11 @@ export default {
                 currentMember.value.persona = tempPersonaText.value;
                 currentMember.value.groupNickname = tempMemberNickname.value;
                 currentMember.value.memberAvatarFrame = tempMemberAvatarFrame.value;
+
+                // 如果是自己，同步更新群设置中的 userGroupNickname
+                if (currentMember.value.isSelf || currentMember.value.id === 'self') {
+                    tempQQSettings.userGroupNickname = tempMemberNickname.value;
+                }
             }
             isPersonaModalOpen.value = false;
         };
@@ -337,7 +479,8 @@ export default {
                     role: 'member',
                     title: '',
                     groupNickname: '',
-                    memberAvatarFrame: ''
+                    memberAvatarFrame: '',
+                    isMuted: false
                 }));
             
             tempQQSettings.members.push(...newMembers);
@@ -573,6 +716,9 @@ export default {
                     if (m.tempComment === undefined) m.tempComment = '';
                 });
             }
+            // 新增：初始化日志列表
+            if (props.qqData.logs === undefined) props.qqData.logs = [];
+
 
             // ✅ 新增：確保每個 chat 有 heartThoughts 陣列
             if (Array.isArray(props.qqData.chatList)) {
@@ -585,12 +731,57 @@ export default {
                     if (c.status === undefined) c.status = 'online';
                     // 新增：聊天室背景
                     if (c.backgroundUrl === undefined) c.backgroundUrl = '';
+                    // 新增：好友连接
+                    if (c.connectedFriends === undefined) c.connectedFriends = {};
                 });
             }
         });
 
         const getCurrentChat = () => {
             return props.qqData.chatList.find(c => c.id === props.qqData.currentChatId) || {};
+        };
+
+        // 新增：分页消息计算属性
+        const displayedMessages = computed(() => {
+            const chat = getCurrentChat();
+            if (!chat || !chat.messages) return [];
+            const msgs = chat.messages;
+            if (msgs.length <= displayedMsgCount.value) return msgs;
+            return msgs.slice(msgs.length - displayedMsgCount.value);
+        });
+
+        const hasMoreMessages = computed(() => {
+            const chat = getCurrentChat();
+            if (!chat || !chat.messages) return false;
+            return chat.messages.length > displayedMsgCount.value;
+        });
+
+        const loadMoreMessages = () => {
+            if (isLoadingMore.value) return;
+            const chat = getCurrentChat();
+            if (!chat || !chat.messages || chat.messages.length <= displayedMsgCount.value) return;
+
+            isLoadingMore.value = true;
+            
+            // 记录当前滚动位置和高度
+            const container = chatContainer.value;
+            if (container) {
+                const oldScrollHeight = container.scrollHeight;
+                const oldScrollTop = container.scrollTop;
+                
+                // 增加显示数量
+                displayedMsgCount.value += 50;
+                
+                nextTick(() => {
+                    // 恢复滚动位置
+                    const newScrollHeight = container.scrollHeight;
+                    container.scrollTop = newScrollHeight - oldScrollHeight + oldScrollTop;
+                    isLoadingMore.value = false;
+                });
+            } else {
+                displayedMsgCount.value += 50;
+                isLoadingMore.value = false;
+            }
         };
 
         // 新增：计算最终的CSS (合并通用CSS和群成员专属CSS)
@@ -694,13 +885,15 @@ export default {
         // 新增：头像框
         aiAvatarFrame: '',
         userAvatarFrame: '',
-        npcList: [] // 新增：NPC库
+        npcList: [], // 新增：NPC库
+        connectedFriends: {} // 新增：好友连接
     };
     props.qqData.chatList.unshift(newChat);
 };
 
         const enterChat = (id) => {
             props.qqData.currentChatId = id;
+            displayedMsgCount.value = 50; // 重置显示数量
             exitMultiSelectMode();
             nextTick(() => scrollChatToBottom());
         };
@@ -735,10 +928,19 @@ export default {
             if (chat.userAvatarFrame === undefined) chat.userAvatarFrame = '';
             // 新增：初始化NPC库
             if (chat.npcList === undefined) chat.npcList = [];
+            // 新增：初始化好友连接
+            if (chat.connectedFriends === undefined) chat.connectedFriends = {};
             // 新增：初始化群公告
             if (chat.groupAnnouncement === undefined) chat.groupAnnouncement = '';
             // 新增：初始化成员气泡样式
             if (chat.memberBubbleStyles === undefined) chat.memberBubbleStyles = {};
+
+            // 确保所有成员都有 isMuted 属性
+            if (chat.members) {
+                chat.members.forEach(m => {
+                    if (m.isMuted === undefined) m.isMuted = false;
+                });
+            }
 
             if(chat.currentSummary && typeof chat.currentSummary === 'string') {
                 chat.memoryList.push({ id: Date.now(), content: chat.currentSummary });
@@ -771,6 +973,7 @@ export default {
             if (chat.aiExclusiveStickers) tempQQSettings.aiExclusiveStickers = JSON.parse(JSON.stringify(chat.aiExclusiveStickers));
             if (chat.selectedWorldbooks) tempQQSettings.selectedWorldbooks = JSON.parse(JSON.stringify(chat.selectedWorldbooks));
             if (chat.npcList) tempQQSettings.npcList = JSON.parse(JSON.stringify(chat.npcList));
+            if (chat.connectedFriends) tempQQSettings.connectedFriends = JSON.parse(JSON.stringify(chat.connectedFriends));
             if (chat.members) tempQQSettings.members = JSON.parse(JSON.stringify(chat.members));
             if (chat.memberBubbleStyles) tempQQSettings.memberBubbleStyles = JSON.parse(JSON.stringify(chat.memberBubbleStyles));
 
@@ -926,6 +1129,16 @@ export default {
             if (!props.qqData.inputMsg.trim()) return;
             
             const chat = props.qqData.chatList.find(c => c.id === props.qqData.currentChatId);
+            
+            // 检查是否被禁言
+            if (chat.isGroup) {
+                const selfMember = chat.members.find(m => m.isSelf || m.id === 'self');
+                if (selfMember && selfMember.isMuted) {
+                    alert("你已被禁言，无法发送消息");
+                    return;
+                }
+            }
+
             const userContent = props.qqData.inputMsg;
             props.qqData.inputMsg = ''; 
             
@@ -1836,7 +2049,8 @@ const generateHiddenThought = async (chat, baseUrl) => {
                             const titleInfo = m.title ? ` (群头衔: ${m.title})` : '';
                             // 新增：注入群昵称信息
                             const nicknameInfo = m.groupNickname ? ` (群昵称: ${m.groupNickname})` : '';
-                            systemPrompt += `- ${m.name}${nicknameInfo}${titleInfo}: ${m.persona}\n`;
+                            const mutedInfo = m.isMuted ? ' (已禁言)' : '';
+                            systemPrompt += `- ${m.name}${nicknameInfo}${titleInfo}${mutedInfo}: ${m.persona}\n`;
                         });
                     }
                     systemPrompt += `\n用户（我）的设定：${chat.userPersona || '无'}\n`;
@@ -1853,6 +2067,49 @@ const generateHiddenThought = async (chat, baseUrl) => {
                         chat.npcList.forEach(npc => {
                             systemPrompt += `[${npc.name}]: ${npc.setting || ''} (关系: ${npc.relation || '未知'})\n`;
                         });
+                    }
+                }
+
+                // 新增：注入好友连接信息
+                if (chat.connectedFriends && Object.keys(chat.connectedFriends).length > 0) {
+                    if (chat.isGroup) {
+                        systemPrompt += `\n\n【好友连接信息】: 群聊中的所有成员都可以感知到以下连接的好友/群组的设定和近期对话内容，并可以在对话中自然地引用或回应这些信息。\n`;
+                    } else {
+                        systemPrompt += `\n\n【好友连接信息】: 你已连接到以下好友/群组，可以感知到他们的设定和近期对话内容。\n`;
+                    }
+                    for (const friendId in chat.connectedFriends) {
+                        const connectedChat = props.qqData.chatList.find(c => c.id == friendId);
+                        if (connectedChat) {
+                            const connectionDetails = chat.connectedFriends[friendId];
+                            const messageCount = connectionDetails.count || 10;
+                            
+                            systemPrompt += `\n--- 开始连接 [${connectedChat.remark || connectedChat.name}] ---\n`;
+                            if (connectedChat.isGroup) {
+                                systemPrompt += `[群组设定]: ${connectedChat.summaryPrompt || '无特殊设定'}\n`;
+                                systemPrompt += `[群成员]: ${connectedChat.members.map(m => m.groupNickname || m.name).join(', ')}\n`;
+                            } else {
+                                systemPrompt += `[好友人设]: ${connectedChat.aiPersona || '无'}\n`;
+                            }
+
+                            if (connectedChat.messages && connectedChat.messages.length > 0) {
+                                const recentMessages = connectedChat.messages.slice(-messageCount);
+                                systemPrompt += `[最近 ${messageCount} 条对话]:\n`;
+                                recentMessages.forEach(msg => {
+                                    let senderName;
+                                    if (msg.role === 'user') {
+                                        senderName = connectedChat.isGroup ? (connectedChat.userGroupNickname || props.qqData.selfName || '我') : (props.qqData.selfName || '我');
+                                    } else {
+                                        senderName = connectedChat.isGroup ? (msg.customName || msg.name) : (connectedChat.remark || connectedChat.name);
+                                    }
+                                    let contentPreview = msg.content;
+                                    if (msg.type !== 'text') {
+                                        contentPreview = `[${msg.type}]`;
+                                    }
+                                    systemPrompt += `${senderName}: ${contentPreview}\n`;
+                                });
+                            }
+                            systemPrompt += `--- 结束连接 [${connectedChat.remark || connectedChat.name}] ---\n`;
+                        }
                     }
                 }
 
@@ -1943,6 +2200,7 @@ const generateHiddenThought = async (chat, baseUrl) => {
 4. **角色扮演**：
    - 只有对当前话题感兴趣的角色才会发言。
    - 语气必须极度口语化、简短，像真实的朋友聊天。
+   - **被标记为 (已禁言) 的成员绝对不能发言**。
 5. **格式要求**：
    - 每行一条消息，格式严格为：[角色名]: 内容
    - 角色名必须完全匹配群成员列表中的名字（或群昵称）。优先使用群昵称。
@@ -2345,10 +2603,10 @@ const generateHiddenThought = async (chat, baseUrl) => {
         };
 
         // --- 交互功能 ---
-        const handleMsgTouchStart = (e, index) => {
+        const handleMsgTouchStart = (e, msg) => {
             if(isMultiSelectMode.value) return;
             longPressTimer = setTimeout(() => {
-                showContextMenu(e, index);
+                showContextMenu(e, msg);
             }, 600); 
         };
 
@@ -2366,7 +2624,7 @@ const generateHiddenThought = async (chat, baseUrl) => {
             }
         };
 
-        const showContextMenu = (e, index) => {
+        const showContextMenu = (e, msg) => {
             if (e.preventDefault) e.preventDefault();
 
             let clientX, clientY;
@@ -2403,13 +2661,13 @@ const generateHiddenThought = async (chat, baseUrl) => {
             
             contextMenu.x = adjustedX;
             contextMenu.y = adjustedY;
-            contextMenu.msgIndex = index;
+            contextMenu.targetMsg = msg;
             contextMenu.visible = true;
         };
 
         const hideContextMenu = () => {
             contextMenu.visible = false;
-            contextMenu.msgIndex = -1;
+            contextMenu.targetMsg = null;
         };
 
         // 新增：跨瀏覽器複製支援
@@ -2445,7 +2703,8 @@ const copyToClipboard = async (text) => {
         // 修改：menuAction 支援 async 複製，並在複製成功/失敗後給予提示
         const menuAction = async (action) => {
             const chat = getCurrentChat();
-            const msg = chat.messages[contextMenu.msgIndex];
+            const msg = contextMenu.targetMsg;
+            if (!msg) return;
 
             if (action === 'edit') {
                 if(msg.type !== 'text') { alert("仅普通文本消息可编辑"); hideContextMenu(); return; }
@@ -2470,11 +2729,11 @@ const copyToClipboard = async (text) => {
                 hideContextMenu();
             } else if (action === 'multi') {
                 isMultiSelectMode.value = true;
-                selectedMsgIndices.value.add(contextMenu.msgIndex);
+                selectedMessages.value.add(msg);
                 hideContextMenu();
             } else if (action === 'quote') {
                 const chat = getCurrentChat();
-                const msg = chat.messages[contextMenu.msgIndex];
+                // msg is already defined
                 
                 let name = msg.role === 'user' ? (props.qqData.selfName || '我') : (msg.customName || chat.remark || chat.name);
                 if (chat.isGroup && msg.role !== 'user' && msg.name) {
@@ -2496,22 +2755,19 @@ const copyToClipboard = async (text) => {
             }
         };
 
-        const toggleSelectMsg = (index) => {
+        const toggleSelectMsg = (msg) => {
             if (!isMultiSelectMode.value) return;
-            // const msg = getCurrentChat().messages[index];
-            // if (msg.isRetracted) return;
-            // ↑↑↑ 移除這一行，允許多選撤回消息
-
-            if (selectedMsgIndices.value.has(index)) {
-                selectedMsgIndices.value.delete(index);
+            
+            if (selectedMessages.value.has(msg)) {
+                selectedMessages.value.delete(msg);
             } else {
-                selectedMsgIndices.value.add(index);
+                selectedMessages.value.add(msg);
             }
         };
 
         const exitMultiSelectMode = () => {
             isMultiSelectMode.value = false;
-            selectedMsgIndices.value.clear();
+            selectedMessages.value.clear();
         };
 
         const updateLastMsg = (chat) => {
@@ -2537,16 +2793,16 @@ const copyToClipboard = async (text) => {
         };
 
         const deleteSelectedMessages = () => {
-            if (!confirm(`确定删除选中的 ${selectedMsgIndices.value.size} 条消息吗？这将影响AI的记忆。`)) return;
+            if (!confirm(`确定删除选中的 ${selectedMessages.value.size} 条消息吗？这将影响AI的记忆。`)) return;
             const chat = getCurrentChat();
-            // 允許刪除撤回消息（不需修改，原本就會刪除所有選中的 index）
-            chat.messages = chat.messages.filter((_, idx) => !selectedMsgIndices.value.has(idx));
+            // 允許刪除撤回消息
+            chat.messages = chat.messages.filter((m) => !selectedMessages.value.has(m));
             updateLastMsg(chat);
             exitMultiSelectMode();
         };
 
         const openForwardModal = () => {
-            if (selectedMsgIndices.value.size === 0) return;
+            if (selectedMessages.value.size === 0) return;
             isForwardModalOpen.value = true;
         };
 
@@ -2555,9 +2811,10 @@ const copyToClipboard = async (text) => {
             const targetChat = props.qqData.chatList.find(c => c.id === targetChatId);
             if (!targetChat) return;
 
-            const indices = Array.from(selectedMsgIndices.value).sort((a,b) => a-b);
-            const forwardedList = indices.map((idx) => {
-                const m = sourceChat.messages[idx];
+            // 保持原始顺序
+            const msgsToForward = sourceChat.messages.filter(m => selectedMessages.value.has(m));
+            
+            const forwardedList = msgsToForward.map((m) => {
                  let displayContent = m.content;
                  if(m.type === 'voice') displayContent = '[语音]';
                  else if(m.type === 'image') displayContent = '[图片]';
@@ -2814,11 +3071,15 @@ const setFrame = (frame) => {
                 // 新增：初始化点赞和评论
                 likes: [],
                 comments: [],
-                tempComment: ''
+                tempComment: '',
+                isGeneratingComments: false // 新增：评论生成状态
             };
 
             props.qqData.momentsList.unshift(newMoment);
             isPublishMomentOpen.value = false;
+
+            // 新增：触发AI自动回复
+            generateMomentComments(newMoment);
         };
 
         // --- 新增：说说交互方法 ---
@@ -2913,9 +3174,24 @@ const setFrame = (frame) => {
                 let combinedPersona = '';
                 let combinedNpcList = [];
                 let combinedRecentChat = '';
+                let combinedConnections = '';
 
                 selectedChats.forEach(chat => {
                     combinedPersona += `【角色: ${chat.remark || chat.name}】\n人设: ${chat.aiPersona}\n\n`;
+                    
+                    // 收集连接好友信息
+                    if (chat.connectedFriends && Object.keys(chat.connectedFriends).length > 0) {
+                        combinedConnections += `【${chat.remark || chat.name} 的连接好友】:\n`;
+                        for (const friendId in chat.connectedFriends) {
+                            const friendChat = props.qqData.chatList.find(c => c.id == friendId);
+                            if (friendChat) {
+                                const friendName = friendChat.remark || friendChat.name;
+                                combinedConnections += `- ${friendName} (人设: ${friendChat.aiPersona || '无'})\n`;
+                            }
+                        }
+                        combinedConnections += '\n';
+                    }
+
                     if (chat.npcList) {
                         combinedNpcList.push(...chat.npcList);
                     }
@@ -2940,7 +3216,7 @@ const setFrame = (frame) => {
                 const npcNames = uniqueNpcList.map(n => n.name).join(', ');
 
                 // 2. 构建 Prompt
-                const systemPrompt = `你是一个社交媒体动态生成器。请根据提供的角色人设、NPC列表和最近的聊天记录，生成一条符合角色当前状态和心情的朋友圈动态。
+                const systemPrompt = `你是一个社交媒体动态生成器。请根据提供的角色人设、NPC列表、连接好友信息和最近的聊天记录，生成一条符合角色当前状态和心情的朋友圈动态。
                 
 要求：
 1. 从选定的角色中随机选择一位作为动态发布者。
@@ -2949,15 +3225,18 @@ const setFrame = (frame) => {
 4. 可以包含 [图片]描述 的标签，描述一张符合动态内容的图片。
 5. 生成 0-5 个来自 NPC 列表中的角色的点赞。
 6. 生成 0-3 条来自 NPC 列表中的角色的评论。
+7. **重要规则**：如果选定的发布者有【连接好友】，则：
+   - 所有连接好友必须出现在 likes (点赞) 列表中。
+   - 必须从连接好友中选择 1-2 位发表评论（加入 comments 列表），评论内容需符合该好友人设。
 
 请严格按照以下 JSON 格式返回结果（不要包含任何其他文字）：
 {
   "authorName": "发布者名字",
   "content": "动态文字内容",
   "imageDesc": "图片描述（可选，如果没有则留空）",
-  "likes": ["NPC名字1", "NPC名字2"],
+  "likes": ["NPC名字1", "NPC名字2", "连接好友名字"],
   "comments": [
-    {"author": "NPC名字", "content": "评论内容"}
+    {"author": "NPC名字或连接好友名字", "content": "评论内容"}
   ]
 }`;
 
@@ -2965,6 +3244,9 @@ const setFrame = (frame) => {
 【可选发布者】：${selectedChats.map(c => c.remark || c.name).join(', ')}
 【角色人设】：
 ${combinedPersona}
+
+【连接好友信息】：
+${combinedConnections}
 
 【已知 NPC】：${npcNames}
 
@@ -3022,13 +3304,12 @@ ${combinedRecentChat}
                 const authorChat = selectedChats.find(c => (c.remark === result.authorName || c.name === result.authorName)) || selectedChats[0];
                 
                 let images = [];
-                if (result.imageDesc) {
-                    // 这里可以使用文生图 API，暂时用占位图
-                    // 如果描述包含特定关键词，可以尝试匹配不同的占位图
-                    images.push('https://i.postimg.cc/tJYSkjdD/wu-biao-ti100-20260205190245.png'); 
-                } else if (result.content.includes('[图片]')) {
-                     images.push('https://i.postimg.cc/tJYSkjdD/wu-biao-ti100-20260205190245.png');
-                     result.content = result.content.replace(/\[图片\]/g, '').trim();
+                let imageDescText = result.imageDesc || '';
+                if (result.content.includes('[图片]')) {
+                    result.content = result.content.replace(/\[图片\]/g, '').trim();
+                    if (!imageDescText) {
+                        imageDescText = '一张图片';
+                    }
                 }
 
                 // 6. 创建动态对象
@@ -3040,7 +3321,7 @@ ${combinedRecentChat}
                     },
                     content: result.content,
                     images: images,
-                    imageDescription: result.imageDesc || (result.content.includes('[图片]') ? '一张图片' : ''),
+                    imageDescription: imageDescText,
                     mentions: [],
                     location: '',
                     timestamp: Date.now(),
@@ -3064,6 +3345,128 @@ ${combinedRecentChat}
             }
         };
 
+        // 新增：AI 自动回复动态
+        const generateMomentComments = async (moment) => {
+            if (!props.apiConfig.key || !props.apiConfig.endpoint) {
+                // Don't alert, just fail silently
+                console.log("API config missing, skipping moment comments generation.");
+                return;
+            }
+            const targetMoment = props.qqData.momentsList.find(m => m.id === moment.id);
+            if (!targetMoment) return;
+
+            targetMoment.isGeneratingComments = true;
+
+            try {
+                // 1. 收集好友列表 (非群组)
+                const friends = props.qqData.chatList.filter(c => !c.isGroup);
+                if (friends.length === 0) return;
+
+                // 2. 构建 Prompt
+                const systemPrompt = `你是一个社交动态评论生成器。一个用户刚刚发布了一条动态，请你扮演该用户的好友，并为这条动态生成一些回复。
+
+要求：
+1.  从提供的好友列表中，随机选择 1 到 ${Math.min(friends.length, 5)} 位好友进行回复。不要所有人都回复。
+2.  回复内容必须符合每个好友的人设（aiPersona）。
+3.  回复内容应该自然、口语化，就像真实的朋友在评论一样。
+4.  回复可以是文字，也可以是点赞。
+5.  严格按照以下 JSON 格式返回一个包含所有回复的数组（不要包含任何其他文字）：
+    [
+      {
+        "authorName": "好友A的名字",
+        "action": "comment",
+        "content": "这是好友A的评论内容。"
+      },
+      {
+        "authorName": "好友B的名字",
+        "action": "like"
+      }
+    ]
+`;
+
+                let userPrompt = `【动态发布者】: ${moment.author.name}\n`;
+                userPrompt += `【动态内容】: ${moment.content}\n`;
+                if (moment.images && moment.images.length > 0) {
+                    userPrompt += `【动态图片】: [包含 ${moment.images.length} 张图片]\n`;
+                }
+                userPrompt += "\n【好友列表和人设】:\n";
+                friends.forEach(friend => {
+                    userPrompt += `- ${friend.remark || friend.name}: ${friend.aiPersona || '无特殊人设'}\n`;
+                });
+
+                userPrompt += "\n请为这条动态生成一些好友的回复。";
+
+                // 3. 调用 API
+                let baseUrl = props.apiConfig.endpoint.trim().replace(/\/+$/, '');
+                if (baseUrl.endsWith('/v1')) baseUrl = baseUrl.slice(0, -3);
+
+                const res = await fetch(`${baseUrl}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: { 
+                        'Authorization': `Bearer ${props.apiConfig.key}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        model: props.apiConfig.model || 'gpt-3.5-turbo',
+                        messages: [
+                            { role: "system", content: systemPrompt },
+                            { role: "user", content: userPrompt }
+                        ],
+                        temperature: 0.9
+                    })
+                });
+
+                if (!res.ok) throw new Error(`API Error: ${res.status}`);
+                const data = await res.json();
+                const aiContent = data.choices[0].message.content;
+                
+                // 4. 解析并添加评论/点赞
+                let results;
+                try {
+                    const jsonMatch = aiContent.match(/\[[\s\S]*\]/);
+                    if (jsonMatch) {
+                        results = JSON.parse(jsonMatch[0]);
+                    } else {
+                        throw new Error("No JSON array found");
+                    }
+                } catch (e) {
+                    console.error("Moment comment JSON Parse Error", e, aiContent);
+                    return; // Exit if parsing fails
+                }
+
+                if (!Array.isArray(results)) {
+                    targetMoment.isGeneratingComments = false;
+                    return;
+                }
+
+                // 逐条添加，增加延迟
+                let delay = 1000 + Math.random() * 2000; // 初始延迟 1-3 秒
+                for (const result of results) {
+                    setTimeout(() => {
+                        if (result.action === 'comment' && result.content) {
+                            targetMoment.comments.push({
+                                id: Date.now() + Math.random(),
+                                author: result.authorName,
+                                content: result.content
+                            });
+                        } else if (result.action === 'like') {
+                            if (!targetMoment.likes.includes(result.authorName)) {
+                                targetMoment.likes.push(result.authorName);
+                            }
+                        }
+                    }, delay);
+                    delay += 1500 + Math.random() * 3000; // 后续延迟 1.5-4.5 秒
+                }
+
+            } catch (e) {
+                console.error("生成动态评论失败: ", e);
+            } finally {
+                if (targetMoment) {
+                    targetMoment.isGeneratingComments = false;
+                }
+            }
+        };
+
 
         // 颜色配置：衣着(蓝)、行为(绿)、心声(粉)、坏心思(紫)
         const heartStyles = {
@@ -3072,6 +3475,66 @@ ${combinedRecentChat}
             thought:  { bg: '#fff0f6', border: '#ffadd2', title: '#c41d7f', label: '心声' },
             evil:     { bg: '#f9f0ff', border: '#d3adf7', title: '#531dab', label: '坏心思' }
         };
+
+        // --- 新增：日志功能方法 ---
+        const getFormattedDate = (date) => {
+            const d = date ? new Date(date) : new Date();
+            const year = d.getFullYear();
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            return `${year}年${month}月${day}日`;
+        };
+
+        const openLogList = () => {
+            isLogListOpen.value = true;
+        };
+
+        const openLogViewer = (log = null) => {
+            if (log) {
+                // 查看或编辑现有日志
+                Object.assign(currentLog, log);
+            } else {
+                // 新建日志
+                currentLog.id = null;
+                currentLog.date = getFormattedDate();
+                currentLog.content = '';
+            }
+            isLogListOpen.value = false;
+            isLogViewerOpen.value = true;
+        };
+
+        const saveLog = () => {
+            if (!currentLog.content.trim()) {
+                alert("日志内容不能为空");
+                return;
+            }
+            if (currentLog.id) {
+                // 更新现有日志
+                const index = props.qqData.logs.findIndex(l => l.id === currentLog.id);
+                if (index !== -1) {
+                    props.qqData.logs[index].content = currentLog.content;
+                }
+            } else {
+                // 保存新日志
+                props.qqData.logs.unshift({
+                    id: Date.now(),
+                    date: currentLog.date,
+                    content: currentLog.content
+                });
+            }
+            isLogViewerOpen.value = false;
+            isLogListOpen.value = true; // 保存后返回列表
+        };
+        
+        const deleteLog = (logId) => {
+            if (confirm("确定要删除这篇日志吗？")) {
+                const index = props.qqData.logs.findIndex(l => l.id === logId);
+                if (index !== -1) {
+                    props.qqData.logs.splice(index, 1);
+                }
+            }
+        };
+
 
         return {
             heartStyles,
@@ -3089,9 +3552,10 @@ ${combinedRecentChat}
             showContextMenu,
             hideContextMenu,
             menuAction,
-            isMultiSelectMode, selectedMsgIndices, toggleSelectMsg, exitMultiSelectMode, 
+            isMultiSelectMode, selectedMessages, toggleSelectMsg, exitMultiSelectMode, 
             deleteSelectedMessages, openForwardModal, isForwardModalOpen, forwardToChat,
             forwardViewer, openForwardViewer,
+            displayedMessages, hasMoreMessages, loadMoreMessages, isLoadingMore,
             // 功能相关
             openRedPacketModal, confirmRedPacket, sendVoice, triggerImageUpload, sendTextImage, handleImageMsgChange,
             isLocationModalOpen, locationForm, openLocationModal, sendLocation, toggleVoiceText,
@@ -3116,6 +3580,8 @@ ${combinedRecentChat}
             // NPC库
             isNpcManagerOpen, isNpcEditOpen, npcManagerTab, tempNpcData, editingNpcIndex,
             openNpcManager, openNpcEdit, saveNpc, deleteNpc,
+            // 好友连接
+            isFriendConnectModalOpen,
             // 动态页面
             triggerMomentsBgUpload, triggerSelfAvatarUpload,
             editSelfName, editVisitorCount,
@@ -3135,6 +3601,11 @@ ${combinedRecentChat}
             isMomentGenSettingsOpen, selectedGenFriendIds, isGeneratingMoment,
             openMomentGenSettings, toggleGenFriendSelection, generateDynamicMoment,
             handleRedPacketClick,
+            // 新增：日志功能
+            isLogViewerOpen, isLogListOpen, currentLog,
+            openLogList, openLogViewer, saveLog, deleteLog,
+            // 新增：滑动置顶
+            swipedChatId, touchStartX, touchCurrentX, handleTouchStart, handleTouchMove, handleTouchEnd, togglePin, sortedChatList,
             // 新增：红包详情
             redPacketDetailsModal, sortedClaimedUsers,
             // 群组
@@ -3144,7 +3615,7 @@ ${combinedRecentChat}
             isRoleModalOpen, isPersonaModalOpen, currentMember, tempPersonaText,
             // 新增：成员信息编辑
             tempMemberNickname, tempMemberAvatarFrame, isMemberFrameModalOpen,
-            openRoleModal, toggleAdmin, transferOwner, openPersonaModal, savePersona,
+            openRoleModal, toggleAdmin, transferOwner, toggleMuteMember, kickMember, openPersonaModal, savePersona,
             openMemberFrameModal, setMemberFrame,
             // 添加群成员
             isAddMemberModalOpen, selectedNewMemberIds, openAddMemberModal, toggleNewMemberSelection, addMembersToGroup,
@@ -3169,16 +3640,43 @@ ${combinedRecentChat}
                 </div>
                 <div class="app-header-left" @click="$emit('close')" style="font-weight: 400; position: absolute; left: 15px;">关闭</div>
             </div>
-            <div class="app-content" style="padding: 0; flex: 1; overflow-y: auto;">
+            <div class="app-content" style="padding: 0; flex: 1; overflow-y: auto; overflow-x: hidden;">
                 <div v-show="activeTab === 'msg'" class="qq-list">
-                    <div class="qq-list-item" v-for="chat in qqData.chatList" :key="chat.id" @click="enterChat(chat.id)">
-                        <div class="qq-avatar" :style="{ backgroundImage: 'url(' + (chat.avatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg') + ')' }"></div>
-                        <div class="qq-info">
-                            <div class="qq-name-row">
-                                <span class="qq-name">{{ chat.remark || chat.name }}</span>
-                                <span class="qq-time" v-if="chat.lastTime">{{ chat.lastTime }}</span>
+                    <div class="qq-list-item-container" 
+                         v-for="chat in sortedChatList" 
+                         :key="chat.id" 
+                         style="position: relative; overflow: hidden;">
+                        
+                        <!-- 背景操作按钮层 -->
+                        <div style="position: absolute; top: 0; right: 0; bottom: 0; display: flex; z-index: 0;">
+                            <div @click.stop="togglePin(chat)" 
+                                 :style="{ background: chat.isPinned ? '#ff9500' : '#007aff' }"
+                                 style="width: 80px; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 14px;">
+                                {{ chat.isPinned ? '取消置顶' : '置顶' }}
                             </div>
-                            <div class="qq-last-msg">{{ chat.lastMsg || '暂无消息' }}</div>
+                        </div>
+
+                        <!-- 前景内容层 -->
+                        <div class="qq-list-item" 
+                             @click="enterChat(chat.id)"
+                             @touchstart="handleTouchStart($event, chat.id)"
+                             @touchmove="handleTouchMove($event, chat.id)"
+                             @touchend="handleTouchEnd"
+                             :style="{ 
+                                 transform: swipedChatId === chat.id ? 'translateX(-80px)' : 'translateX(0)',
+                                 transition: 'transform 0.3s ease',
+                                 backgroundColor: chat.isPinned ? '#f2f2f7' : 'white',
+                                 position: 'relative',
+                                 zIndex: 1
+                             }">
+                            <div class="qq-avatar" :style="{ backgroundImage: 'url(' + (chat.avatar || 'https://i.postimg.cc/4N1jy7hV/wu-biao-ti98-20260205164643.jpg') + ')' }"></div>
+                            <div class="qq-info">
+                                <div class="qq-name-row">
+                                    <span class="qq-name">{{ chat.remark || chat.name }}</span>
+                                    <span class="qq-time" v-if="chat.lastTime">{{ chat.lastTime }}</span>
+                                </div>
+                                <div class="qq-last-msg">{{ chat.lastMsg || '暂无消息' }}</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -3235,7 +3733,7 @@ ${combinedRecentChat}
                                 </div>
                                 <span style="font-size: 12px; color: #333;">说说</span>
                             </div>
-                            <div style="display: flex; flex-direction: column; align-items: center; gap: 5px; opacity: 0.5;">
+                            <div @click="openLogList" style="display: flex; flex-direction: column; align-items: center; gap: 5px; cursor: pointer;">
                                 <div style="width: 40px; height: 40px; display: flex; justify-content: center; align-items: center; color: #333; background: #f5f5f5; border-radius: 8px;">
                                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
                                 </div>
@@ -3276,15 +3774,17 @@ ${combinedRecentChat}
                                 </div>
                                 <div v-if="moment.content" style="margin-bottom: 8px; white-space: pre-wrap; line-height: 1.6;">{{ moment.content }}</div>
                                 <div v-if="moment.images && moment.images.length > 0" style="margin-bottom: 8px;">
-                                    <div v-if="moment.imageDescription" style="background-color: #f2f2f7; border-radius: 4px; overflow: hidden; width: 100%; max-width: 200px; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; padding: 15px; box-sizing: border-box; border: 1px solid #e5e5ea;">
-                                        <span style="font-size: 13px; color: #666; text-align: center; line-height: 1.4;">
-                                            {{ moment.imageDescription }}
-                                        </span>
-                                    </div>
-                                    <div v-else style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;">
+                                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px;">
                                         <div v-for="(img, idx) in moment.images" :key="idx" style="padding-top: 100%; position: relative; background-color: #eee; border-radius: 4px; overflow: hidden;">
                                             <img :src="img" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover;">
                                         </div>
+                                    </div>
+                                </div>
+                                <div v-else-if="moment.imageDescription" style="margin-bottom: 8px;">
+                                    <div style="background-color: #f2f2f7; border-radius: 4px; overflow: hidden; width: 100%; max-width: 200px; aspect-ratio: 1; display: flex; align-items: center; justify-content: center; padding: 15px; box-sizing: border-box; border: 1px solid #e5e5ea;">
+                                        <span style="font-size: 13px; color: #666; text-align: center; line-height: 1.4;">
+                                            {{ moment.imageDescription }}
+                                        </span>
                                     </div>
                                 </div>
                                 <div v-if="moment.location" style="font-size: 12px; color: #586b95; margin-bottom: 5px;">📍 {{ moment.location }}</div>
@@ -3309,7 +3809,7 @@ ${combinedRecentChat}
                                 <!-- 新增：点赞和评论区 -->
                                 <div style="background: #f7f7f7; border-radius: 4px; padding: 8px 12px;">
                                     <!-- 点赞列表 -->
-                                    <div v-if="moment.likes.length > 0" style="padding-bottom: 8px; border-bottom: 1px solid #eee; margin-bottom: 8px; font-size: 14px; color: #586b95; display: flex; align-items: center; flex-wrap: wrap;">
+                                    <div v-if="moment.likes.length > 0" style="padding-bottom: 8px; border-bottom: (moment.comments.length > 0 || moment.isGeneratingComments) ? '1px solid #eee' : 'none'; margin-bottom: 8px; font-size: 14px; color: #586b95; display: flex; align-items: center; flex-wrap: wrap;">
                                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 6px; transform: translateY(1px); flex-shrink: 0;">
                                             <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.28a2 2 0 0 0 2-1.7l1.38-9a2 2 0 0 0-2-2.3zM7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3"></path>
                                         </svg>
@@ -3318,14 +3818,13 @@ ${combinedRecentChat}
                                     <!-- 评论列表 -->
                                     <div v-if="moment.comments.length > 0" style="display: flex; flex-direction: column; gap: 5px; font-size: 14px; margin-bottom: 10px;">
                                         <div v-for="comment in moment.comments" :key="comment.id">
-                                            <strong style="color: #586b95;">{{ qqData.selfName || '我' }}: </strong>
+                                            <strong style="color: #586b95;">{{ comment.author }}: </strong>
                                             <span>{{ comment.content }}</span>
                                         </div>
                                     </div>
-                                    <!-- 评论输入框 -->
-                                    <div style="display: flex; gap: 8px;">
-                                        <input type="text" v-model="moment.tempComment" @keyup.enter="submitComment(moment)" placeholder="发表评论..." style="flex: 1; border: 1px solid #ddd; border-radius: 15px; padding: 6px 12px; font-size: 14px; background: #fff;">
-                                        <button @click="submitComment(moment)" :disabled="!moment.tempComment.trim()" :style="{ border: 'none', background: moment.tempComment.trim() ? 'var(--accent-color)' : '#dcdcdc', color: 'white', borderRadius: '15px', padding: '6px 12px', fontSize: '14px' }">发送</button>
+                                    <!-- 新增：正在生成提示 -->
+                                    <div v-if="moment.isGeneratingComments" style="font-size: 13px; color: #999; text-align: center; padding: 5px 0; font-style: italic;">
+                                        大家正在评论...
                                     </div>
                                 </div>
                             </div>
@@ -3400,7 +3899,12 @@ ${combinedRecentChat}
                 <!-- ✅ 动态注入当前聊天的自定义CSS，使用 scoped 属性确保样式隔离 -->
                 <component :is="'style'" v-if="finalCustomCSS">{{ finalCustomCSS }}</component>
                 
-                <template v-for="(msg, index) in getCurrentChat().messages" :key="index">
+                <div v-if="hasMoreMessages" style="text-align: center; padding: 10px; cursor: pointer;" @click="loadMoreMessages">
+                    <span v-if="isLoadingMore" style="font-size: 12px; color: #888;">加载中...</span>
+                    <span v-else style="font-size: 12px; color: #007aff;">载入之前的消息</span>
+                </div>
+
+                <template v-for="(msg, index) in displayedMessages" :key="msg.timestamp || index">
                     <!-- 时间气泡 -->
                     <div v-if="msg.showTime" style="width: 100%; text-align: center; margin: 20px 0 10px;">
                         <span style="background: rgba(0, 0, 0, 0.2); color: white; padding: 3px 8px; border-radius: 4px; font-size: 12px;">{{ msg.timeDisplay }}</span>
@@ -3409,7 +3913,7 @@ ${combinedRecentChat}
                     <div class="chat-row"
                         style="display:flex; width: 100%; margin-bottom: 0.5px; align-items: flex-start; position: relative;"
                         :style="{ flexDirection: msg.role === 'user' ? 'row-reverse' : 'row' }"
-                        @click="toggleSelectMsg(index)"
+                        @click="toggleSelectMsg(msg)"
                     >
                         <!-- 多选框 -->
                     <div v-if="isMultiSelectMode" 
@@ -3418,21 +3922,21 @@ ${combinedRecentChat}
                     >
                          <div :style="{
                              width: '20px', height: '20px', borderRadius: '50%',
-                             border: selectedMsgIndices.has(index) ? 'none' : '2px solid #ccc',
-                             background: selectedMsgIndices.has(index) ? 'var(--accent-color)' : 'transparent',
+                             border: selectedMessages.has(msg) ? 'none' : '2px solid #ccc',
+                             background: selectedMessages.has(msg) ? 'var(--accent-color)' : 'transparent',
                              display: 'flex', alignItems: 'center', justifyContent: 'center'
                          }">
-                            <span v-if="selectedMsgIndices.has(index)" style="color:white; font-size:12px;">✓</span>
+                            <span v-if="selectedMessages.has(msg)" style="color:white; font-size:12px;">✓</span>
                          </div>
                     </div>
 
                     <!-- 撤回消息 -->
                     <div v-if="msg.isRetracted"
                          style="width: 100%; text-align: center; margin: 5px 0;"
-                         @touchstart="handleMsgTouchStart($event, index)"
+                         @touchstart="handleMsgTouchStart($event, msg)"
                          @touchend="handleMsgTouchEnd"
                          @touchcancel="handleMsgTouchEnd"
-                         @contextmenu.prevent="showContextMenu($event, index)"
+                         @contextmenu.prevent="showContextMenu($event, msg)"
                     >
                         <span style="background: rgba(0, 0, 0, 0.2); color: white; padding: 2px 8px; border-radius: 4px; font-size: 12px;">
                             {{ msg.role === 'user' ? '我' : (getCurrentChat().isGroup ? (msg.customName || msg.name) : (getCurrentChat().remark || getCurrentChat().name)) }} 撤回了一则消息
@@ -3459,10 +3963,10 @@ ${combinedRecentChat}
                                 <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                                 <div :class="['message-bubble', msg.role === 'user' ? 'user' : 'ai']">
                                     <div class="content"
-                                        @touchstart="handleMsgTouchStart($event, index)"
+                                        @touchstart="handleMsgTouchStart($event, msg)"
                                         @touchend="handleMsgTouchEnd"
                                         @touchcancel="handleMsgTouchEnd"
-                                        @contextmenu.prevent="showContextMenu($event, index)"
+                                        @contextmenu.prevent="showContextMenu($event, msg)"
                                         @click="toggleVoiceText(msg)"
                                         :style="[
                                             {
@@ -3518,9 +4022,9 @@ ${combinedRecentChat}
                             <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
                                 <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                                 <div class="chat-bubble"
-                                     @touchstart="handleMsgTouchStart($event, index)"
+                                     @touchstart="handleMsgTouchStart($event, msg)"
                                      @touchend="handleMsgTouchEnd"
-                                     @contextmenu.prevent="showContextMenu($event, index)"
+                                     @contextmenu.prevent="showContextMenu($event, msg)"
                                      @click="handleRedPacketClick(msg)"
                                      style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: linear-gradient(135deg, #ffc3a0 0%, #ffafbd 100%); border: none; overflow: hidden; width: 220px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); cursor: pointer;"
                                 >
@@ -3552,9 +4056,9 @@ ${combinedRecentChat}
                             <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
                                 <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                                 <div class="chat-bubble"
-                                     @touchstart="handleMsgTouchStart($event, index)"
+                                     @touchstart="handleMsgTouchStart($event, msg)"
                                      @touchend="handleMsgTouchEnd"
-                                     @contextmenu.prevent="showContextMenu($event, index)"
+                                     @contextmenu.prevent="showContextMenu($event, msg)"
                                      @click="handleRedPacketClick(msg)"
                                      style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: linear-gradient(135deg, #a1c4fd 0%, #c2e9fb 100%); border: none; overflow: hidden; width: 220px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.08); cursor: pointer;"
                                 >
@@ -3584,9 +4088,9 @@ ${combinedRecentChat}
                             <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
                                 <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                                 <div class="chat-bubble"
-                                    @touchstart="handleMsgTouchStart($event, index)"
+                                    @touchstart="handleMsgTouchStart($event, msg)"
                                     @touchend="handleMsgTouchEnd"
-                                    @contextmenu.prevent="showContextMenu($event, index)"
+                                    @contextmenu.prevent="showContextMenu($event, msg)"
                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: transparent; border: none; overflow: hidden;"
                                 >
                                     <img :src="msg.src" style="max-width: 120px; max-height: 120px; display: block; border-radius: 4px;">
@@ -3606,9 +4110,9 @@ ${combinedRecentChat}
                             <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
                                 <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                                 <div class="chat-bubble"
-                                    @touchstart="handleMsgTouchStart($event, index)"
+                                    @touchstart="handleMsgTouchStart($event, msg)"
                                     @touchend="handleMsgTouchEnd"
-                                    @contextmenu.prevent="showContextMenu($event, index)"
+                                    @contextmenu.prevent="showContextMenu($event, msg)"
                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: transparent; border: none; overflow: hidden;"
                                 >
                                     <img v-if="msg.imgType === 'local'" :src="msg.src" style="max-width: 150px; max-height: 200px; border-radius: 8px; display: block;">
@@ -3635,9 +4139,9 @@ ${combinedRecentChat}
                             <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
                                 <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                                 <div class="chat-bubble"
-                                    @touchstart="handleMsgTouchStart($event, index)"
+                                    @touchstart="handleMsgTouchStart($event, msg)"
                                     @touchend="handleMsgTouchEnd"
-                                    @contextmenu.prevent="showContextMenu($event, index)"
+                                    @contextmenu.prevent="showContextMenu($event, msg)"
                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; background: white; border: 1px solid #ddd; overflow: hidden; width: 220px; border-radius: 8px;"
                                 >
                                     <div style="height: 100px; position: relative; background-color: #f2f1ed; background-image: linear-gradient(#dcdcdc 1px, transparent 1px), linear-gradient(90deg, #dcdcdc 1px, transparent 1px); background-size: 20px 20px;">
@@ -3668,9 +4172,9 @@ ${combinedRecentChat}
                             <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
                                 <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                                 <div class="chat-bubble"
-                                    @touchstart="handleMsgTouchStart($event, index)"
+                                    @touchstart="handleMsgTouchStart($event, msg)"
                                     @touchend="handleMsgTouchEnd"
-                                    @contextmenu.prevent="showContextMenu($event, index)"
+                                    @contextmenu.prevent="showContextMenu($event, msg)"
                                     @click.stop="openLinkViewer(msg)"
                                     style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; overflow: hidden; background: white; border: 1px solid #ddd; width: 230px; cursor: pointer;"
                                 >
@@ -3703,9 +4207,9 @@ ${combinedRecentChat}
                             <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
                                 <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                                 <div class="chat-bubble"
-                                     @touchstart="handleMsgTouchStart($event, index)"
+                                     @touchstart="handleMsgTouchStart($event, msg)"
                                      @touchend="handleMsgTouchEnd"
-                                     @contextmenu.prevent="showContextMenu($event, index)"
+                                     @contextmenu.prevent="showContextMenu($event, msg)"
                                      @click.stop="openForwardViewer(msg)"
                                      style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; overflow: hidden; background: white; border: 1px solid #ddd; width: 220px; cursor: pointer;"
                                  >
@@ -3734,9 +4238,9 @@ ${combinedRecentChat}
                             <div style="display:flex; align-items:flex-end; gap:6px;" :style="{ flexDirection: msg.role === 'user' ? 'row' : 'row-reverse' }">
                                 <div v-if="msg.time" :style="{ fontSize: ((getCurrentChat().fontSize || 16) * 11 / 16) + 'px' }" style="color: #999; white-space:nowrap; text-shadow: 0 1px 2px rgba(255,255,255,0.8);">{{ msg.time }}</div>
                                 <div class="chat-bubble"
-                                     @touchstart="handleMsgTouchStart($event, index)"
+                                     @touchstart="handleMsgTouchStart($event, msg)"
                                      @touchend="handleMsgTouchEnd"
-                                     @contextmenu.prevent="showContextMenu($event, index)"
+                                     @contextmenu.prevent="showContextMenu($event, msg)"
                                      @click.stop="openMomentDetail(msg)"
                                      style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none; padding: 0; overflow: hidden; background: white; border: 1px solid #ddd; width: 220px; cursor: pointer;"
                                  >
@@ -3773,10 +4277,10 @@ ${combinedRecentChat}
                                 <div :class="['message-bubble', msg.role === 'user' ? 'user' : 'ai', getMemberBubbleClass(msg)]"
                                      :style="hasMemberCustomStyle(msg) ? 'background: transparent !important; padding: 0 !important; box-shadow: none !important; border: none !important;' : ''">
                                     <div class="content"
-                                        @touchstart="handleMsgTouchStart($event, index)"
+                                        @touchstart="handleMsgTouchStart($event, msg)"
                                         @touchend="handleMsgTouchEnd"
                                         @touchcancel="handleMsgTouchEnd"
-                                        @contextmenu.prevent="showContextMenu($event, index)"
+                                        @contextmenu.prevent="showContextMenu($event, msg)"
                                         :style="(!getCurrentChat().customCSS && !hasMemberCustomStyle(msg)) ? (msg.role === 'user' ? 'background: var(--accent-color); color: #fff; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;' : 'background: #fff; color: #000; padding: ' + ((getCurrentChat().fontSize || 16) * 10 / 16) + 'px ' + ((getCurrentChat().fontSize || 16) * 14 / 16) + 'px; border-radius: 8px; font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;') : 'font-size: ' + (getCurrentChat().fontSize || 16) + 'px; line-height: 1.4; word-break: break-word; max-width: 100%;'"
 
                                         style="-webkit-touch-callout: none; -webkit-user-select: none; user-select: none;"
@@ -3798,11 +4302,11 @@ ${combinedRecentChat}
 
             <!-- 底部工具栏 -->
             <div v-if="isMultiSelectMode" class="chat-input-bar" style="justify-content: space-around; background: #f7f7f7;">
-                <button @click="openForwardModal" :disabled="selectedMsgIndices.size === 0" style="background:none; border:none; color:#007aff; display:flex; flex-direction:column; align-items:center;">
+                <button @click="openForwardModal" :disabled="selectedMessages.size === 0" style="background:none; border:none; color:#007aff; display:flex; flex-direction:column; align-items:center;">
                     <span style="font-size:20px;">↪️</span>
                     <span style="font-size:12px; margin-top: 2px;">转发</span>
                 </button>
-                <button @click="deleteSelectedMessages" :disabled="selectedMsgIndices.size === 0" style="background:none; border:none; color:#ff3b30; display:flex; flex-direction:column; align-items:center;">
+                <button @click="deleteSelectedMessages" :disabled="selectedMessages.size === 0" style="background:none; border:none; color:#ff3b30; display:flex; flex-direction:column; align-items:center;">
                     <span style="font-size:20px;">🗑️</span>
                     <span style="font-size:12px; margin-top: 2px;">删除</span>
                 </button>
@@ -4106,6 +4610,7 @@ ${combinedRecentChat}
                                             <span style="font-size: 13px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ member.groupNickname || member.name }}</span>
                                             <span v-if="member.role === 'owner'" style="font-size: 10px; color: #ff9500; margin-left: 4px; border: 1px solid #ff9500; padding: 0 2px; border-radius: 2px; flex-shrink: 0;">群主</span>
                                             <span v-else-if="member.role === 'admin'" style="font-size: 10px; color: #34c759; margin-left: 4px; border: 1px solid #34c759; padding: 0 2px; border-radius: 2px; flex-shrink: 0;">管理</span>
+                                            <span v-if="member.isMuted" style="font-size: 10px; color: #ff3b30; margin-left: 4px; border: 1px solid #ff3b30; padding: 0 2px; border-radius: 2px; flex-shrink: 0;">已禁言</span>
                                         </div>
                                         <span v-if="member.title" style="font-size: 10px; color: #888; background: #e0e0e0; padding: 0 4px; border-radius: 4px; width: fit-content; margin-top: 2px;">{{ member.title }}</span>
                                     </div>
@@ -4169,6 +4674,17 @@ ${combinedRecentChat}
                         <input type="datetime-local" v-model="tempQQSettings.timeOverride" style="display:block; width:100%; height:40px; margin:0; padding:8px; border:1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow); border-radius:6px; box-sizing: border-box; -webkit-appearance: none; background: #fff; font-size: 14px;" />
                     </div>
                 </div>
+                <!-- 好友连接入口 -->
+                <div style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                        <span style="font-weight:bold; font-size:15px;">好友连接</span>
+                    </div>
+                    <button class="modal-btn" style="width:100%; font-size:13px; background:#f0f0f0; color:#333; border:1px solid var(--accent-color); box-shadow: 0 0 4px var(--accent-color-shadow);" 
+                            @click="isFriendConnectModalOpen = true">
+                        管理好友连接 ({{ tempQQSettings.connectedFriends ? Object.keys(tempQQSettings.connectedFriends).length : 0 }})
+                    </button>
+                </div>
+
                 <!-- NPC库入口 (仅单聊显示) -->
                 <div v-if="!tempQQSettings.isGroup" style="border-top: 1px solid #eee; margin-top: 15px; padding-top: 10px;">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
@@ -4812,8 +5328,14 @@ ${combinedRecentChat}
                     <button class="modal-btn" @click="toggleAdmin" style="background: #f5f5f7; color: #333; border: 1px solid #ddd;">
                         {{ currentMember && currentMember.role === 'admin' ? '取消管理员' : '设定为管理员' }}
                     </button>
-                    <button class="modal-btn" @click="transferOwner" style="background: #f5f5f7; color: #ff3b30; border: 1px solid #ddd;">
+                    <button class="modal-btn" @click="transferOwner" style="background: #f5f5f7; color: #ff9500; border: 1px solid #ddd;">
                         转让群主
+                    </button>
+                    <button class="modal-btn" @click="toggleMuteMember" style="background: #f5f5f7; color: #ff9500; border: 1px solid #ddd;">
+                        {{ currentMember && currentMember.isMuted ? '解除禁言' : '禁言' }}
+                    </button>
+                    <button class="modal-btn" @click="kickMember" style="background: #f5f5f7; color: #ff3b30; border: 1px solid #ddd;">
+                        移出群聊
                     </button>
                 </div>
                 <button class="modal-btn cancel" @click="isRoleModalOpen = false" style="margin-top: 15px;">取消</button>
@@ -4982,6 +5504,84 @@ ${combinedRecentChat}
                     <button class="modal-btn cancel" @click="isMomentGenSettingsOpen = false">取消</button>
                     <button class="modal-btn" @click="generateDynamicMoment" style="background: #34c759; color: white;">生成 ({{ selectedGenFriendIds.size }})</button>
                 </div>
+            </div>
+        </div>
+
+        <!-- 好友连接 Modal -->
+        <div v-if="isFriendConnectModalOpen" class="modal-overlay center-popup" style="z-index: 3700;" @click.self="isFriendConnectModalOpen = false">
+            <div class="modal-content" style="max-height: 80vh; display: flex; flex-direction: column;">
+                <div class="modal-title">好友连接</div>
+                <div style="font-size: 12px; color: #666; margin-bottom: 15px; text-align: center;">让当前AI感知其他好友的人设和近期对话</div>
+                
+                <div style="flex: 1; overflow-y: auto; border: 1px solid #eee; border-radius: 8px; padding: 10px;">
+                    <div v-for="chat in qqData.chatList.filter(c => c.id !== tempQQSettings.id)" :key="chat.id" 
+                         style="padding: 10px; border-bottom: 1px solid #f5f5f5; display: flex; align-items: center; justify-content: space-between;">
+                        <div style="display: flex; align-items: center;">
+                            <div class="qq-avatar" :style="{ backgroundImage: 'url(' + chat.avatar + ')' }" style="width: 30px; height: 30px; margin-right: 10px;"></div>
+                            <span style="flex: 1;">{{ chat.remark || chat.name }}</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <input type="checkbox" 
+                                   :checked="tempQQSettings.connectedFriends && tempQQSettings.connectedFriends[chat.id]"
+                                   @change="e => {
+                                       if (e.target.checked) {
+                                           if (!tempQQSettings.connectedFriends) tempQQSettings.connectedFriends = {};
+                                           tempQQSettings.connectedFriends[chat.id] = { count: 10 }; // 默认10条
+                                       } else {
+                                           delete tempQQSettings.connectedFriends[chat.id];
+                                       }
+                                   }">
+                            <input type="number" 
+                                   v-if="tempQQSettings.connectedFriends && tempQQSettings.connectedFriends[chat.id]"
+                                   v-model.number="tempQQSettings.connectedFriends[chat.id].count"
+                                   min="1" max="50"
+                                   style="width: 60px; text-align: center; border: 1px solid #ddd; border-radius: 4px; padding: 4px;">
+                        </div>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button class="modal-btn" @click="isFriendConnectModalOpen = false" style="width: 100%; background: var(--accent-color); color: white;">完成</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 新增：日志列表 Modal -->
+        <div v-if="isLogListOpen" class="modal-overlay center-popup" style="z-index: 3800;" @click.self="isLogListOpen = false">
+            <div class="modal-content" style="width: 90%; max-width: 500px; height: 80vh; display: flex; flex-direction: column;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-shrink: 0;">
+                    <div style="font-weight: bold; font-size: 17px;">我的日志</div>
+                    <button @click="openLogViewer(null)" style="border:none; background: #007aff; color: white; padding: 6px 15px; border-radius: 15px; font-size: 15px;">写新日志</button>
+                </div>
+                <div style="flex: 1; overflow-y: auto;">
+                    <div v-if="!qqData.logs || qqData.logs.length === 0" style="text-align: center; color: #999; padding: 40px 0;">
+                        还没有写过日志哦
+                    </div>
+                    <div v-else>
+                        <div v-for="log in qqData.logs" :key="log.id" @click="openLogViewer(log)" style="background: #f9f9f9; padding: 15px; border-radius: 8px; margin-bottom: 10px; border: 1px solid #eee; cursor: pointer;">
+                            <div style="font-weight: bold; font-size: 15px; color: #333; margin-bottom: 8px;">{{ log.date }}</div>
+                            <p style="font-size: 14px; color: #666; line-height: 1.5; margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-overflow: ellipsis;">
+                                {{ log.content }}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+                <button @click="isLogListOpen = false" style="background: #f0f0f0; color: #555; border: none; padding: 14px; border-radius: 12px; font-size: 16px; font-weight: 500; cursor: pointer; text-align: center; width: 100%; margin-top: 15px; flex-shrink: 0;">关闭</button>
+            </div>
+        </div>
+
+        <!-- 新增：日志查看/编辑 Modal -->
+        <div v-if="isLogViewerOpen" class="modal-overlay center-popup" style="z-index: 3900;" @click.self="isLogViewerOpen = false">
+            <div class="modal-content" style="width: 90%; max-width: 500px; height: 80vh; display: flex; flex-direction: column;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; flex-shrink: 0;">
+                    <button @click="isLogViewerOpen = false; isLogListOpen = true;" style="border:none; background:none; font-size: 16px;">返回</button>
+                    <div style="font-weight: bold; font-size: 17px;">{{ currentLog.date }}</div>
+                    <button @click="saveLog" style="border:none; background: #34c759; color: white; padding: 6px 15px; border-radius: 15px; font-size: 15px;">保存</button>
+                </div>
+                <div style="flex: 1; overflow-y: auto; display: flex; flex-direction: column;">
+                    <textarea v-model="currentLog.content" placeholder="记录今天发生的事吧..." style="width: 100%; flex: 1; border: 1px solid #eee; border-radius: 8px; resize: none; font-size: 16px; padding: 15px; line-height: 1.7;"></textarea>
+                </div>
+                 <button v-if="currentLog.id" @click="deleteLog(currentLog.id); isLogViewerOpen = false; isLogListOpen = true;" class="modal-btn" style="color: #ff3b30; margin-top: 15px; flex-shrink: 0;">删除此篇</button>
             </div>
         </div>
     </div>
